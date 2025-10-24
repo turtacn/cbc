@@ -32,7 +32,7 @@
 1. **Clone the repository:**
    ```sh
    git clone https://github.com/turtacn/cbc.git
-   cd cbc-auth
+   cd cbc
    ```
 
 2. **Start the services:**
