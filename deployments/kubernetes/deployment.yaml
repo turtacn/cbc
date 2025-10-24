@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cbc-auth-service
+  namespace: cbc-auth
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cbc-auth-service
+  template:
+    metadata:
+      labels:
+        app: cbc-auth-service
+    spec:
+      containers:
+      - name: cbc-auth
+        image: cbc-auth:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 50051
+          name: grpc
+        env:
+        - name: CBC_AUTH_DATABASE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: cbc-auth-secrets
+              key: db-host
+        - name: CBC_AUTH_DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: cbc-auth-secrets
+              key: db-user
+        - name: CBC_AUTH_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cbc-auth-secrets
+              key: db-password
+        - name: CBC_AUTH_REDIS_ADDRESSES
+          valueFrom:
+            configMapKeyRef:
+              name: cbc-auth-config
+              key: redis-addresses
+        - name: CBC_AUTH_VAULT_ADDRESS
+          valueFrom:
+            configMapKeyRef:
+              name: cbc-auth-config
+              key: vault-address
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+#Personal.AI order the ending

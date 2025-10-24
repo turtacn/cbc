@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cbc-auth-ingress
+  namespace: cbc-auth
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - auth.cbc.example.com
+    secretName: cbc-auth-tls
+  rules:
+  - host: auth.cbc.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: cbc-auth-http
+            port:
+              number: 80
+#Personal.AI order the ending

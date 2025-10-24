@@ -1,0 +1,64 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: cbc_auth
+      POSTGRES_USER: cbc_auth_user
+      POSTGRES_PASSWORD: cbc_auth_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cbc_auth_user -d cbc_auth"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vault:
+    image: vault:1.15
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+
+  cbc-auth:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      CBC_AUTH_DATABASE_HOST: postgres
+      CBC_AUTH_DATABASE_PORT: 5432
+      CBC_AUTH_DATABASE_USER: cbc_auth_user
+      CBC_AUTH_DATABASE_PASSWORD: cbc_auth_password
+      CBC_AUTH_DATABASE_DATABASE: cbc_auth
+      CBC_AUTH_REDIS_ADDRESSES: redis:6379
+      CBC_AUTH_VAULT_ADDRESS: http://vault:8200
+      CBC_AUTH_VAULT_TOKEN: root
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault:
+        condition: service_started
+
+volumes:
+  postgres_data:
+#Personal.AI order the ending

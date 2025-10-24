@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/turtacn/cbc/api/proto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+service AuthService {
+  rpc IssueToken(IssueTokenRequest) returns (TokenResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (TokenResponse);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+}
+
+message IssueTokenRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+  string grant_type = 3;
+  // In a real scenario, credentials would be passed here
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RevokeTokenRequest {
+  string token = 1;
+}
+
+message VerifyTokenRequest {
+  string token = 1;
+}
+
+message TokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message RevokeTokenResponse {
+  bool success = 1;
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  google.protobuf.Struct claims = 2;
+}
+//Personal.AI order the ending

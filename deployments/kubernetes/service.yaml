@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbc-auth-http
+  namespace: cbc-auth
+spec:
+  type: ClusterIP
+  selector:
+    app: cbc-auth-service
+  ports:
+  - port: 80
+    targetPort: 8080
+    name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbc-auth-grpc
+  namespace: cbc-auth
+spec:
+  type: ClusterIP
+  selector:
+    app: cbc-auth-service
+  ports:
+  - port: 50051
+    targetPort: 50051
+    name: grpc
+#Personal.AI order the ending
