@@ -9,7 +9,7 @@ graph TD
     end
 
     subgraph "API Layer"
-        HTTP[HTTP API (Gin)]
+        HTTP[HTTP API （Gin）]
         gRPC[gRPC API]
     end
 
