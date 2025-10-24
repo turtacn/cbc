@@ -1,0 +1,56 @@
+# deployments/kubernetes/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cbc-auth-config
+  namespace: cbc-system
+  labels:
+    app: cbc-auth-service
+    component: auth
+data:
+  # Database configuration
+  db.host: "postgres.cbc-system.svc.cluster.local"
+  db.port: "5432"
+  db.name: "cbc_auth"
+  db.max_open_conns: "25"
+  db.max_idle_conns: "5"
+  db.conn_max_lifetime: "5m"
+
+  # Redis configuration
+  redis.host: "redis.cbc-system.svc.cluster.local"
+  redis.port: "6379"
+  redis.db: "0"
+  redis.max_retries: "3"
+  redis.pool_size: "10"
+
+  # JWT configuration
+  jwt.issuer: "cbc-auth-service"
+  jwt.access_token_expiry: "15m"
+  jwt.refresh_token_expiry: "720h"
+
+  # Rate limiting
+  rate_limit.enabled: "true"
+  rate_limit.requests_per_minute: "100"
+  rate_limit.burst: "10"
+
+  # Server configuration
+  server.http_port: "8080"
+  server.grpc_port: "9090"
+  server.metrics_port: "9091"
+  server.read_timeout: "30s"
+  server.write_timeout: "30s"
+  server.shutdown_timeout: "30s"
+
+  # Observability
+  tracing.enabled: "true"
+  tracing.endpoint: "jaeger-collector.observability.svc.cluster.local:14268"
+  tracing.sample_rate: "0.1"
+
+  metrics.enabled: "true"
+  metrics.namespace: "cbc"
+  metrics.subsystem: "auth"
+
+  # Feature flags
+  features.multi_tenant: "true"
+  features.device_tracking: "true"
+  features.token_rotation: "true"

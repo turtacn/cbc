@@ -1,0 +1,69 @@
+# deployments/kubernetes/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbc-auth-service
+  namespace: cbc-system
+  labels:
+    app: cbc-auth-service
+    component: auth
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app: cbc-auth-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbc-auth-service-headless
+  namespace: cbc-system
+  labels:
+    app: cbc-auth-service
+    component: auth
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app: cbc-auth-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbc-auth-service-metrics
+  namespace: cbc-system
+  labels:
+    app: cbc-auth-service
+    component: auth
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9091
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: cbc-auth-service

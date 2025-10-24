@@ -1,0 +1,262 @@
+syntax = "proto3";
+
+package cbc.auth.v1;
+
+option go_package = "github.com/turtacn/cbc/api/proto;authpb";
+
+// AuthService 定义认证服务的 gRPC 接口
+service AuthService {
+  // IssueToken 颁发访问令牌(支持多种 grant_type)
+  rpc IssueToken(IssueTokenRequest) returns (TokenResponse);
+
+  // RefreshToken 使用 Refresh Token 获取新的 Access Token
+  rpc RefreshToken(RefreshTokenRequest) returns (TokenResponse);
+
+  // RevokeToken 吊销令牌(支持 Refresh Token 和 Access Token)
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+
+  // VerifyToken 验证令牌有效性并返回 Claims
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+
+  // IntrospectToken 内省令牌(RFC 7662)
+  rpc IntrospectToken(IntrospectTokenRequest) returns (IntrospectTokenResponse);
+}
+
+// IssueTokenRequest 颁发令牌请求
+message IssueTokenRequest {
+  // 租户标识符(必填)
+  string tenant_id = 1;
+
+  // 设备标识符(必填)
+  string device_id = 2;
+
+  // 授权类型(必填):client_credentials, device_code, refresh_token
+  string grant_type = 3;
+
+  // 客户端凭证(grant_type=client_credentials 时必填)
+  ClientCredentials credentials = 4;
+
+  // 设备信息(可选,用于设备指纹绑定)
+  DeviceInfo device_info = 5;
+
+  // 请求的权限范围(可选,默认继承租户配置)
+  repeated string scope = 6;
+
+  // 请求 ID(可选,用于幂等性控制)
+  string request_id = 7;
+}
+
+// ClientCredentials 客户端凭证(用于 MGR 注册设备)
+message ClientCredentials {
+  // MGR 客户端 ID
+  string client_id = 1;
+
+  // Client Assertion Type(固定值:urn:ietf:params:oauth:client-assertion-type:jwt-bearer)
+  string client_assertion_type = 2;
+
+  // Client Assertion JWT(MGR 使用私钥签名)
+  string client_assertion = 3;
+}
+
+// DeviceInfo 设备信息
+message DeviceInfo {
+  // 设备指纹哈希值
+  string device_fingerprint = 1;
+
+  // 操作系统类型(Windows, Linux, macOS, iOS, Android)
+  string os_type = 2;
+
+  // 操作系统版本
+  string os_version = 3;
+
+  // 设备型号
+  string device_model = 4;
+
+  // 应用版本
+  string app_version = 5;
+}
+
+// TokenResponse 令牌响应
+message TokenResponse {
+  // Access Token(短效令牌)
+  string access_token = 1;
+
+  // Refresh Token(长效令牌,可选)
+  string refresh_token = 2;
+
+  // 令牌类型(固定值:Bearer)
+  string token_type = 3;
+
+  // Access Token 有效期(秒)
+  int64 expires_in = 4;
+
+  // 授予的权限范围
+  repeated string scope = 5;
+
+  // 令牌颁发时间戳(Unix 时间)
+  int64 issued_at = 6;
+
+  // 租户 ID(用于客户端验证)
+  string tenant_id = 7;
+}
+
+// RefreshTokenRequest 刷新令牌请求
+message RefreshTokenRequest {
+  // Refresh Token(必填)
+  string refresh_token = 1;
+
+  // 请求的权限范围(可选,不能超过原有 scope)
+  repeated string scope = 2;
+
+  // 请求 ID(可选)
+  string request_id = 3;
+}
+
+// RevokeTokenRequest 吊销令牌请求
+message RevokeTokenRequest {
+  // 令牌字符串(必填)
+  string token = 1;
+
+  // 令牌类型提示(可选:access_token, refresh_token)
+  string token_type_hint = 2;
+
+  // 吊销原因(可选)
+  string reason = 3;
+
+  // 操作员 ID(可选,用于审计)
+  string operator_id = 4;
+}
+
+// RevokeTokenResponse 吊销令牌响应
+message RevokeTokenResponse {
+  // 是否吊销成功
+  bool revoked = 1;
+
+  // 吊销的令牌 JTI
+  string jti = 2;
+
+  // 吊销时间戳(Unix 时间)
+  int64 revoked_at = 3;
+
+  // 错误信息(吊销失败时)
+  string error_message = 4;
+}
+
+// VerifyTokenRequest 验证令牌请求
+message VerifyTokenRequest {
+  // 令牌字符串(必填)
+  string token = 1;
+
+  // 租户 ID(必填,用于获取公钥)
+  string tenant_id = 2;
+
+  // 是否检查黑名单(可选,默认 true)
+  bool check_blacklist = 3;
+}
+
+// VerifyTokenResponse 验证令牌响应
+message VerifyTokenResponse {
+  // 令牌是否有效
+  bool valid = 1;
+
+  // 令牌 Claims(有效时)
+  TokenClaims claims = 2;
+
+  // 验证失败原因(无效时)
+  string error_code = 3;
+
+  // 验证失败详情(无效时)
+  string error_message = 4;
+}
+
+// TokenClaims 令牌 Claims
+message TokenClaims {
+  // 颁发者(Issuer)
+  string iss = 1;
+
+  // 主体(Subject)
+  string sub = 2;
+
+  // 受众(Audience)
+  repeated string aud = 3;
+
+  // 过期时间戳(Unix 时间)
+  int64 exp = 4;
+
+  // 生效时间戳(Unix 时间)
+  int64 nbf = 5;
+
+  // 颁发时间戳(Unix 时间)
+  int64 iat = 6;
+
+  // JWT ID(唯一标识符)
+  string jti = 7;
+
+  // 租户 ID
+  string tenant_id = 8;
+
+  // 代理 ID
+  string agent_id = 9;
+
+  // 权限范围
+  repeated string scope = 10;
+
+  // 设备信任等级(high, medium, low)
+  string device_trust_level = 11;
+
+  // 令牌类型(access_token, refresh_token)
+  string token_type = 12;
+
+  // 扩展属性(JSON 格式)
+  map<string, string> metadata = 13;
+}
+
+// IntrospectTokenRequest 内省令牌请求(RFC 7662)
+message IntrospectTokenRequest {
+  // 令牌字符串(必填)
+  string token = 1;
+
+  // 令牌类型提示(可选)
+  string token_type_hint = 2;
+
+  // 客户端 ID(可选,用于验证调用方)
+  string client_id = 3;
+
+  // 客户端密钥(可选)
+  string client_secret = 4;
+}
+
+// IntrospectTokenResponse 内省令牌响应
+message IntrospectTokenResponse {
+  // 令牌是否活跃
+  bool active = 1;
+
+  // 权限范围
+  repeated string scope = 2;
+
+  // 客户端 ID
+  string client_id = 3;
+
+  // 租户 ID
+  string tenant_id = 4;
+
+  // 令牌类型
+  string token_type = 5;
+
+  // 过期时间戳(Unix 时间)
+  int64 exp = 6;
+
+  // 颁发时间戳(Unix 时间)
+  int64 iat = 7;
+
+  // 主体(Subject)
+  string sub = 8;
+
+  // JWT ID
+  string jti = 9;
+
+  // 扩展属性
+  map<string, string> metadata = 10;
+}
+
+//Personal.AI order the ending
