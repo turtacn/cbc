@@ -59,4 +59,5 @@ func (d *Device) IsActive() bool {
 func (d *Device) UpdateLastSeen() {
 	d.LastSeenAt = time.Now().UTC()
 }
+
 //Personal.AI order the ending

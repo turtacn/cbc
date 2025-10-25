@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/turtacn/cbc/api/proto"
 	"github.com/turtacn/cbc/internal/application/dto"
-	app_svc "github.com/turtacn/cbc/internal/application/service"
+	appservice "github.com/turtacn/cbc/internal/application/service"
 	"github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/logger"
 	"google.golang.org/grpc"
@@ -17,14 +17,14 @@ import (
 // AuthGRPCService implements the gRPC AuthService.
 type AuthGRPCService struct {
 	pb.UnimplementedAuthServiceServer
-	authAppSvc service.AuthAppService
+	authAppSvc appservice.AuthAppService
 	cryptoSvc  service.CryptoService
 	log        logger.Logger
 }
 
 // NewAuthGRPCServer creates a new gRPC server for the auth service.
 func NewAuthGRPCServer(
-	authAppSvc service.AuthAppService,
+	authAppSvc appservice.AuthAppService,
 	cryptoSvc service.CryptoService,
 	log logger.Logger,
 	interceptors []grpc.UnaryServerInterceptor,
@@ -96,7 +96,7 @@ func (s *AuthGRPCService) RevokeToken(ctx context.Context, req *pb.RevokeTokenRe
 func (s *AuthGRPCService) VerifyToken(ctx context.Context, req *pb.VerifyTokenRequest) (*pb.VerifyTokenResponse, error) {
 	// A real implementation would parse tenantID from the token
 	tenantID := uuid.New()
-	claims, err := s.cryptoSvc.VerifyJWT(ctx, req.Token, tenantID)
+	_, err := s.cryptoSvc.VerifyJWT(ctx, req.Token, tenantID)
 	if err != nil {
 		return &pb.VerifyTokenResponse{Valid: false}, nil
 	}
@@ -104,4 +104,5 @@ func (s *AuthGRPCService) VerifyToken(ctx context.Context, req *pb.VerifyTokenRe
 	// A real implementation would convert claims to a protobuf struct
 	return &pb.VerifyTokenResponse{Valid: true}, nil
 }
+
 //Personal.AI order the ending

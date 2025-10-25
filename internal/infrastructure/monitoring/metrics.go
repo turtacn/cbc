@@ -66,4 +66,5 @@ func (m *Metrics) RecordTokenRevocation(tenantID string) {
 func (m *Metrics) RecordRateLimitHit(scope constants.RateLimitScope) {
 	m.RateLimitHits.WithLabelValues(string(scope)).Inc()
 }
+
 //Personal.AI order the ending

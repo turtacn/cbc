@@ -62,4 +62,5 @@ func (s *tenantAppServiceImpl) RotateTenantKey(ctx context.Context, tenantID uui
 	// For now, this is a placeholder for the logic.
 	return nil
 }
+
 //Personal.AI order the ending

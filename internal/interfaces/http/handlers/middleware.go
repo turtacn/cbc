@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	goerrors "errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -53,7 +55,7 @@ func RecoveryMiddleware(log logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Error(c.Request.Context(), "Panic recovered", errors.New("panic"), logger.Fields{"panic": err})
+				log.Error(c.Request.Context(), "Panic recovered", goerrors.New("panic"), logger.Fields{"panic": err})
 				dto.SendError(c, errors.ErrInternalServer)
 			}
 		}()
@@ -66,7 +68,7 @@ func TracingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Extract trace context from headers
 		propagator := propagation.TraceContext{}
-		ctx := propagator.Extract(c.Request.Context(), c.Request.Header)
+		ctx := propagator.Extract(c.Request.Context(), propagation.HeaderCarrier(c.Request.Header))
 
 		ctx, span := monitoring.StartSpan(
 			ctx,
@@ -131,4 +133,5 @@ func AuthMiddleware(cryptoSvc service.CryptoService) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
 //Personal.AI order the ending

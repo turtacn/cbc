@@ -79,4 +79,5 @@ func (s *deviceAppServiceImpl) UpdateDeviceInfo(ctx context.Context, tenantID, d
 	s.log.Info(ctx, "Device updated successfully", logger.Fields{"device_id": device.DeviceID})
 	return utils.DeviceToDTO(device), nil
 }
+
 //Personal.AI order the ending

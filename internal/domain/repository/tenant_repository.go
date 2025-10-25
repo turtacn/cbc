@@ -22,4 +22,5 @@ type TenantRepository interface {
 	// Save persists a new tenant.
 	Save(ctx context.Context, tenant *models.Tenant) *errors.AppError
 }
+
 //Personal.AI order the ending

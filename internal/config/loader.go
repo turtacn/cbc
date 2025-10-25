@@ -36,7 +36,7 @@ func LoadConfig(log logger.Logger) (*Config, error) {
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, errors.New("failed to unmarshal config").WithError(err)
+		return nil, errors.ErrInternalServer.WithError(err)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -45,4 +45,5 @@ func LoadConfig(log logger.Logger) (*Config, error) {
 
 	return &cfg, nil
 }
+
 //Personal.AI order the ending

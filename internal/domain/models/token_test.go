@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/pkg/constants"
@@ -69,4 +68,5 @@ func TestToken_CanRefresh(t *testing.T) {
 		})
 	}
 }
+
 //Personal.AI order the ending

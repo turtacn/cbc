@@ -16,9 +16,9 @@ type KeyRotationPolicy struct {
 
 // RateLimitConfig defines the rate limiting settings for a tenant.
 type RateLimitConfig struct {
-	Enabled         bool `json:"enabled"`
-	RequestsPerSec  int  `json:"requests_per_sec"`
-	Burst           int  `json:"burst"`
+	Enabled        bool `json:"enabled"`
+	RequestsPerSec int  `json:"requests_per_sec"`
+	Burst          int  `json:"burst"`
 }
 
 // Tenant represents the domain model for a tenant.
@@ -84,4 +84,5 @@ func (t *Tenant) GetRateLimitThreshold() (int, int) {
 	}
 	return t.RateLimitConfig.RequestsPerSec, t.RateLimitConfig.Burst
 }
+
 //Personal.AI order the ending

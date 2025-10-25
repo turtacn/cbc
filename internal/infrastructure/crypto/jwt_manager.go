@@ -2,6 +2,8 @@ package crypto
 
 import (
 	"context"
+	"crypto/rsa"
+	goerrors "errors"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -65,12 +67,16 @@ func (j *jwtManagerImpl) VerifyJWT(ctx context.Context, tokenString string, tena
 			return nil, errors.ErrInvalidToken
 		}
 
-		return j.keyManager.GetPublicKey(ctx, tenantID, kid)
+		publicKey, err := j.keyManager.GetPublicKey(ctx, tenantID, kid)
+		if err != nil {
+			return nil, err
+		}
+		return publicKey, nil
 	})
 
 	if err != nil {
 		// Handle specific JWT errors
-		if errors.Is(err, jwt.ErrTokenExpired) {
+		if err != nil && goerrors.Is(err, jwt.ErrTokenExpired) {
 			return nil, errors.ErrExpiredToken
 		}
 		return nil, errors.ErrInvalidToken.WithError(err)
@@ -92,4 +98,5 @@ func (j *jwtManagerImpl) GetPublicKey(ctx context.Context, tenantID uuid.UUID, k
 func (j *jwtManagerImpl) GetPrivateKey(ctx context.Context, tenantID uuid.UUID) (*rsa.PrivateKey, string, *errors.AppError) {
 	return j.keyManager.GetPrivateKey(ctx, tenantID)
 }
+
 //Personal.AI order the ending

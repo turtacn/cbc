@@ -6,12 +6,14 @@ import (
 	"net"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	pb "github.com/turtacn/cbc/api/proto"
 	"github.com/turtacn/cbc/internal/application/dto"
 	app_svc "github.com/turtacn/cbc/internal/application/service"
-	"github.com/turtacn/cbc/internal/interfaces/grpc"
+	grpchandlers "github.com/turtacn/cbc/internal/interfaces/grpc"
+	"github.com/turtacn/cbc/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -24,16 +26,34 @@ var lis *bufconn.Listener
 type MockAuthAppService struct {
 	mock.Mock
 }
+
 func (m *MockAuthAppService) IssueToken(ctx context.Context, req *dto.TokenIssueRequest) (*dto.TokenPairResponse, *errors.AppError) {
 	args := m.Called(ctx, req)
+	if args.Get(1) == nil {
+		return args.Get(0).(*dto.TokenPairResponse), nil
+	}
 	return args.Get(0).(*dto.TokenPairResponse), args.Get(1).(*errors.AppError)
 }
-// ... other methods mocked
 
+func (m *MockAuthAppService) RevokeToken(ctx context.Context, req *dto.TokenRevokeRequest) *errors.AppError {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*errors.AppError)
+}
+
+func (m *MockAuthAppService) RefreshToken(ctx context.Context, req *dto.TokenRefreshRequest) (*dto.TokenPairResponse, *errors.AppError) {
+	args := m.Called(ctx, req)
+	if args.Get(1) == nil {
+		return args.Get(0).(*dto.TokenPairResponse), nil
+	}
+	return args.Get(0).(*dto.TokenPairResponse), args.Get(1).(*errors.AppError)
+}
 
 func initGRPCServer(authSvc app_svc.AuthAppService) {
 	lis = bufconn.Listen(bufSize)
-	s := grpc.NewAuthGRPCServer(authSvc, nil, nil, nil) // Real implementation needs more dependencies
+	s := grpchandlers.NewAuthGRPCServer(authSvc, nil, nil, nil) // Real implementation needs more dependencies
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)
@@ -68,4 +88,5 @@ func TestAuthGRPCService_IssueToken(t *testing.T) {
 
 	mockAppSvc.AssertExpectations(t)
 }
+
 //Personal.AI order the ending

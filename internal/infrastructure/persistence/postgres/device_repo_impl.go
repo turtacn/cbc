@@ -108,4 +108,5 @@ func (r *deviceRepositoryImpl) scanDevice(ctx context.Context, row pgx.Row) (*mo
 	}
 	return &device, nil
 }
+
 //Personal.AI order the ending

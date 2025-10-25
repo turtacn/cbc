@@ -55,4 +55,5 @@ func (r *RedisConnection) Close() {
 		r.log.Error(context.Background(), "Failed to close Redis connection", err)
 	}
 }
+
 //Personal.AI order the ending

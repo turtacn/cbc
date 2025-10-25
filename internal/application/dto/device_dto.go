@@ -34,4 +34,5 @@ type DeviceResponse struct {
 	RegisteredAt time.Time `json:"registered_at"`
 	LastSeenAt   time.Time `json:"last_seen_at"`
 }
+
 //Personal.AI order the ending

@@ -2,7 +2,7 @@ package utils
 
 import (
 	"fmt"
-	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -35,11 +35,14 @@ func ValidateStruct(s interface{}) *errors.AppError {
 
 // validateUUID is a custom validation function for UUIDs.
 func validateUUID(fl validator.FieldLevel) bool {
-	field := fl.Field().String()
-	if _, err := uuid.Parse(field); err != nil {
-		return false
+	if val, ok := fl.Field().Interface().(uuid.UUID); ok {
+		return val != uuid.Nil
 	}
-	return true
+	if val, ok := fl.Field().Interface().(string); ok {
+		_, err := uuid.Parse(val)
+		return err == nil
+	}
+	return false
 }
 
 // formatValidationError creates a user-friendly error message for a validation error.
@@ -81,4 +84,5 @@ func ValidateNotEmpty(s string) bool {
 func ValidateEmail(email string) bool {
 	return defaultValidator.Var(email, "email") == nil
 }
+
 //Personal.AI order the ending

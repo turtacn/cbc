@@ -10,19 +10,19 @@ import (
 
 // AuditLog represents a single audit trail event.
 type AuditLog struct {
-	EventID     uuid.UUID
-	TenantID    uuid.UUID
-	DeviceID    *uuid.UUID // Can be nil for tenant-level events
-	ActorID     string     // Who performed the action (e.g., DeviceID, UserID, System)
-	EventType   constants.AuditEventType
-	Result      string // "success" or "failure"
-	ResultCode  constants.ErrorCode
-	IPAddress   string
-	UserAgent   string
-	TraceID     string
-	Message     string
-	Metadata    json.RawMessage // Flexible field for event-specific data
-	Timestamp   time.Time
+	EventID    uuid.UUID
+	TenantID   uuid.UUID
+	DeviceID   *uuid.UUID // Can be nil for tenant-level events
+	ActorID    string     // Who performed the action (e.g., DeviceID, UserID, System)
+	EventType  constants.AuditEventType
+	Result     string // "success" or "failure"
+	ResultCode constants.ErrorCode
+	IPAddress  string
+	UserAgent  string
+	TraceID    string
+	Message    string
+	Metadata   json.RawMessage // Flexible field for event-specific data
+	Timestamp  time.Time
 }
 
 // NewAuditLog creates a new audit log entry.
@@ -76,4 +76,5 @@ func (a *AuditLog) WithResultCode(code constants.ErrorCode) *AuditLog {
 	a.ResultCode = code
 	return a
 }
+
 //Personal.AI order the ending

@@ -23,11 +23,11 @@ func TokenToDTO(token *models.Token) *dto.TokenResponse {
 // TokenPairToDTO converts access and refresh tokens to a TokenPairResponse DTO.
 func TokenPairToDTO(accessToken, refreshToken *models.Token, accessTokenString, refreshTokenString string) *dto.TokenPairResponse {
 	return &dto.TokenPairResponse{
-		AccessToken:          accessTokenString,
-		RefreshToken:         refreshTokenString,
-		AccessTokenExpiresIn: int64(time.Until(accessToken.ExpiresAt).Seconds()),
+		AccessToken:           accessTokenString,
+		RefreshToken:          refreshTokenString,
+		AccessTokenExpiresIn:  int64(time.Until(accessToken.ExpiresAt).Seconds()),
 		RefreshTokenExpiresIn: int64(time.Until(refreshToken.ExpiresAt).Seconds()),
-		TokenType:            "Bearer",
+		TokenType:             "Bearer",
 	}
 }
 
@@ -77,4 +77,5 @@ func TimeToUnixPtr(t time.Time) *int64 {
 	unixTime := t.Unix()
 	return &unixTime
 }
+
 //Personal.AI order the ending

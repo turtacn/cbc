@@ -3,8 +3,6 @@ package ratelimit
 import (
 	"sync"
 	"time"
-
-	"github.com/turtacn/cbc/pkg/constants"
 )
 
 // TokenBucket implements a thread-safe token bucket rate limiter.
@@ -58,4 +56,5 @@ func (tb *TokenBucket) refill() {
 	}
 	tb.lastUpdate = now
 }
+
 //Personal.AI order the ending

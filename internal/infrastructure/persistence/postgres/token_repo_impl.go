@@ -103,4 +103,5 @@ func (r *tokenRepositoryImpl) scanToken(ctx context.Context, row pgx.Row) (*mode
 	}
 	return &token, nil
 }
+
 //Personal.AI order the ending

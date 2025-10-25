@@ -57,4 +57,5 @@ func (db *DBConnection) Close() {
 	db.log.Info(context.Background(), "Closing PostgreSQL connection pool")
 	db.Pool.Close()
 }
+
 //Personal.AI order the ending

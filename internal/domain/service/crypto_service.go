@@ -14,7 +14,7 @@ import (
 // primarily JWT handling and key management.
 type CryptoService interface {
 	// GenerateJWT creates and signs a new JWT.
-	GenerateJWT(ctx context.comtext.Context, token *models.Token) (string, *errors.AppError)
+	GenerateJWT(ctx context.Context, token *models.Token) (string, *errors.AppError)
 
 	// VerifyJWT parses and validates a JWT string.
 	// It returns the token claims if the token is valid.
@@ -28,4 +28,5 @@ type CryptoService interface {
 	// This is used by the auth service to sign tokens.
 	GetPrivateKey(ctx context.Context, tenantID uuid.UUID) (*rsa.PrivateKey, string, *errors.AppError)
 }
+
 //Personal.AI order the ending

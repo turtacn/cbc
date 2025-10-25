@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"time"
 )
 
 // Config holds the application's configuration.
@@ -34,7 +33,7 @@ type DatabaseConfig struct {
 	SSLMode         string `mapstructure:"ssl_mode"`
 	MaxConns        int    `mapstructure:"max_conns"`
 	MinConns        int    `mapstructure:"min_conns"`
-	MaxConnLifetime int    `mapstructure:"max_conn_lifetime"` // in minutes
+	MaxConnLifetime int    `mapstructure:"max_conn_lifetime"`  // in minutes
 	MaxConnIdleTime int    `mapstructure:"max_conn_idle_time"` // in minutes
 }
 
@@ -60,7 +59,7 @@ type VaultConfig struct {
 type JWTConfig struct {
 	DefaultAlgorithm string `mapstructure:"default_algorithm"`
 	AccessTokenTTL   int    `mapstructure:"access_token_ttl"`  // in seconds
-	RefreshTokenTTL  int    `mapstructure`:"refresh_token_ttl"` // in seconds
+	RefreshTokenTTL  int    `mapstructure:"refresh_token_ttl"` // in seconds
 }
 
 type RateLimitConfig struct {
@@ -85,4 +84,5 @@ func (c *Config) Validate() error {
 	// Add validation logic here
 	return nil
 }
+
 //Personal.AI order the ending

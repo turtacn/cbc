@@ -18,12 +18,12 @@ import (
 
 // RouterDependencies holds all dependencies for the router.
 type RouterDependencies struct {
-	Config         *config.ServerConfig
-	Logger         logger.Logger
-	AuthHandler    *handlers.AuthHandler
-	DeviceHandler  *handlers.DeviceHandler
-	HealthHandler  *handlers.HealthHandler
-	Middleware     []gin.HandlerFunc
+	Config        *config.ServerConfig
+	Logger        logger.Logger
+	AuthHandler   *handlers.AuthHandler
+	DeviceHandler *handlers.DeviceHandler
+	HealthHandler *handlers.HealthHandler
+	Middleware    []gin.HandlerFunc
 }
 
 // NewRouter creates and configures a new Gin router.
@@ -96,4 +96,5 @@ func StartServer(router *gin.Engine, cfg *config.ServerConfig, log logger.Logger
 		log.Info(context.Background(), "HTTP server gracefully stopped")
 	}
 }
+
 //Personal.AI order the ending

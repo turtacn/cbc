@@ -3,10 +3,9 @@ package ratelimit_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
@@ -18,10 +17,10 @@ func TestRedisRateLimiter_Allow(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 
-	client := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	client := goredis.NewClient(&goredis.Options{Addr: s.Addr()})
 	redisConn := &redis.RedisConnection{Client: client}
 
-	rateLimiter := ratelimit.NewRedisRateLimiter(redisConn, nil) // Real implementation needs logger
+	rateLimiter := ratelimit.NewRedisRateLimiter(redisConn) // Real implementation needs logger
 
 	// This test is simplified. A real test would inject rate and capacity.
 	// For now, we assume a hardcoded low limit for testing.
@@ -49,4 +48,5 @@ func TestRedisRateLimiter_Allow(t *testing.T) {
 	assert.Nil(t, appErr)
 	assert.True(t, allowed)
 }
+
 //Personal.AI order the ending

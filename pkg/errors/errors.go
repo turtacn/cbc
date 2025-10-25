@@ -24,6 +24,9 @@ func (e *AppError) Error() string {
 
 // Unwrap provides compatibility for Go's errors.Is and errors.As.
 func (e *AppError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Err
 }
 
@@ -51,24 +54,29 @@ func NewAppError(code constants.ErrorCode, message string, httpStatus int) *AppE
 // Common error constructors
 
 var (
-	ErrInternalServer = NewAppError(constants.ErrCodeInternalServer, "An unexpected error occurred", http.StatusInternalServerError)
-	ErrInvalidRequest = NewAppError(constants.ErrCodeInvalidRequest, "Invalid request payload", http.StatusBadRequest)
-	ErrValidation     = NewAppError(constants.ErrCodeValidationFailed, "Request validation failed", http.StatusBadRequest)
-	ErrUnauthorized   = NewAppError(constants.ErrCodeUnauthorized, "Authentication failed", http.StatusUnauthorized)
-	ErrForbidden      = NewAppError(constants.ErrCodeForbidden, "Permission denied", http.StatusForbidden)
-	ErrNotFound       = NewAppError(constants.ErrCodeNotFound, "Resource not found", http.StatusNotFound)
+	ErrInternalServer    = NewAppError(constants.ErrCodeInternalServer, "An unexpected error occurred", http.StatusInternalServerError)
+	ErrInvalidRequest    = NewAppError(constants.ErrCodeInvalidRequest, "Invalid request payload", http.StatusBadRequest)
+	ErrValidation        = NewAppError(constants.ErrCodeValidationFailed, "Request validation failed", http.StatusBadRequest)
+	ErrUnauthorized      = NewAppError(constants.ErrCodeUnauthorized, "Authentication failed", http.StatusUnauthorized)
+	ErrForbidden         = NewAppError(constants.ErrCodeForbidden, "Permission denied", http.StatusForbidden)
+	ErrNotFound          = NewAppError(constants.ErrCodeNotFound, "Resource not found", http.StatusNotFound)
 	ErrRateLimitExceeded = NewAppError(constants.ErrCodeRateLimitExceeded, "Too many requests", http.StatusTooManyRequests)
+	ErrInvalidArgument   = NewAppError(constants.ErrCodeInvalidRequest, "Invalid argument", http.StatusBadRequest)
+	ErrInvalidUUID       = NewAppError(constants.ErrCodeInvalidRequest, "Invalid UUID format", http.StatusBadRequest)
+	ErrTenantInactive    = NewAppError(constants.ErrCodeTenantInactive, "Tenant is inactive", http.StatusBadRequest)
+	ErrTooManyRequests   = NewAppError(constants.ErrCodeRateLimitExceeded, "Too many requests", http.StatusTooManyRequests)
 
 	ErrInvalidToken = NewAppError(constants.ErrCodeInvalidToken, "Token is invalid or malformed", http.StatusUnauthorized)
 	ErrExpiredToken = NewAppError(constants.ErrCodeExpiredToken, "Token has expired", http.StatusUnauthorized)
 	ErrTokenRevoked = NewAppError(constants.ErrCodeTokenRevoked, "Token has been revoked", http.StatusUnauthorized)
 
-	ErrInvalidGrant = NewAppError(constants.ErrCodeInvalidGrant, "Invalid grant type or credentials", http.StatusBadRequest)
+	ErrInvalidGrant  = NewAppError(constants.ErrCodeInvalidGrant, "Invalid grant type or credentials", http.StatusBadRequest)
 	ErrInvalidClient = NewAppError(constants.ErrCodeInvalidClient, "Client authentication failed", http.StatusUnauthorized)
 
-	ErrDatabase = NewAppError(constants.ErrCodeDatabaseError, "Database operation failed", http.StatusInternalServerError)
-	ErrCache    = NewAppError(constants.ErrCodeCacheError, "Cache operation failed", http.StatusInternalServerError)
-	ErrVault    = NewAppError(constants.ErrCodeVaultError, "Secret management operation failed", http.StatusInternalServerError)
+	ErrDatabase   = NewAppError(constants.ErrCodeDatabaseError, "Database operation failed", http.StatusInternalServerError)
+	ErrCache      = NewAppError(constants.ErrCodeCacheError, "Cache operation failed", http.StatusInternalServerError)
+	ErrVault      = NewAppError(constants.ErrCodeVaultError, "Secret management operation failed", http.StatusInternalServerError)
+	ErrKMSFailure = NewAppError(constants.ErrCodeKMSFailure, "KMS operation failed", http.StatusInternalServerError)
 )
 
 // Is checks if the target error is of type AppError and matches the code.
@@ -93,4 +101,5 @@ func FromError(err error) *AppError {
 	// Wrap a generic error with a default internal server error
 	return ErrInternalServer.WithError(err)
 }
+
 //Personal.AI order the ending

@@ -111,4 +111,5 @@ func (r *tenantRepositoryImpl) scanTenant(ctx context.Context, row pgx.Row) (*mo
 	}
 	return &tenant, nil
 }
+
 //Personal.AI order the ending

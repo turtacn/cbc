@@ -108,4 +108,5 @@ func (c *cacheManagerImpl) IsBlacklisted(ctx context.Context, jti string) (bool,
 	key := fmt.Sprintf("blacklist:%s", jti)
 	return c.Exists(ctx, key)
 }
+
 //Personal.AI order the ending

@@ -26,4 +26,5 @@ type DeviceRepository interface {
 	// UpdateLastSeen updates the last_seen_at timestamp for a specific device.
 	UpdateLastSeen(ctx context.Context, id uuid.UUID, lastSeenAt time.Time) *errors.AppError
 }
+
 //Personal.AI order the ending

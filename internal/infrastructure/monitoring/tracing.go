@@ -53,4 +53,5 @@ func InitTracer(cfg *config.TracingConfig) (func(), error) {
 func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
 	return Tracer.Start(ctx, name, opts...)
 }
+
 //Personal.AI order the ending

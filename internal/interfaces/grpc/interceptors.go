@@ -2,11 +2,11 @@ package grpc
 
 import (
 	"context"
+	goerrors "errors"
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/constants"
-	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -34,7 +34,7 @@ func UnaryRecoveryInterceptor(log logger.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Error(ctx, "Panic recovered in gRPC handler", errors.New("panic"), logger.Fields{"panic": err})
+				log.Error(ctx, "Panic recovered in gRPC handler", goerrors.New("panic"), logger.Fields{"panic": err})
 			}
 		}()
 		return handler(ctx, req)
@@ -65,4 +65,5 @@ func UnaryRateLimitInterceptor(limiter service.RateLimitService) grpc.UnaryServe
 		return handler(ctx, req)
 	}
 }
+
 //Personal.AI order the ending

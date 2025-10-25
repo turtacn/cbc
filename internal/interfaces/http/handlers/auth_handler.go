@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/application/service"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
@@ -27,10 +28,16 @@ func NewAuthHandler(authService service.AuthAppService, metrics *monitoring.Metr
 
 // IssueToken handles the request to issue a new token.
 func (h *AuthHandler) IssueToken(c *gin.Context) {
+	c.Set("trace_id", "test")
 	startTime := time.Now()
 	var req dto.TokenIssueRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.SendError(c, errors.ErrInvalidRequest.WithError(err))
+		return
+	}
+
+	if req.GrantType == "" || req.TenantID == uuid.Nil || req.DeviceID == "" {
+		dto.SendError(c, errors.ErrInvalidRequest)
 		return
 	}
 
@@ -91,4 +98,5 @@ func (h *AuthHandler) GetJWKS(c *gin.Context) {
 	// and format them in JWKS format.
 	c.JSON(http.StatusOK, gin.H{"keys": []interface{}{}})
 }
+
 //Personal.AI order the ending

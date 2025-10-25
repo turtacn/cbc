@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
 )
@@ -21,4 +20,5 @@ type RateLimitService interface {
 	// Useful for debugging and monitoring.
 	GetCurrentUsage(ctx context.Context, scope constants.RateLimitScope, identifier string) (int, *errors.AppError)
 }
+
 //Personal.AI order the ending

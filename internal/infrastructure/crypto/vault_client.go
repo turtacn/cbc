@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"context"
-	"fmt"
 	"path"
 
 	vault "github.com/hashicorp/vault/api"
@@ -20,8 +19,8 @@ type VaultClient interface {
 }
 
 type vaultClientImpl struct {
-	client *vault.Client
-	log    logger.Logger
+	client    *vault.Client
+	log       logger.Logger
 	mountPath string
 }
 
@@ -40,8 +39,8 @@ func NewVaultClient(cfg *config.VaultConfig, log logger.Logger) (VaultClient, er
 	// For now, we assume a root/dev token is provided.
 
 	return &vaultClientImpl{
-		client: client,
-		log:    log,
+		client:    client,
+		log:       log,
 		mountPath: cfg.MountPath,
 	}, nil
 }
@@ -76,8 +75,8 @@ func (v *vaultClientImpl) DeleteKey(ctx context.Context, keyPath string) *errors
 }
 
 func (v *vaultClientImpl) ListKeys(ctx context.Context, dirPath string) ([]string, *errors.AppError) {
-	fullPath := v.getSecretPath(dirPath)
-	secret, err := v.client.KVv2("secret").List(ctx, fullPath)
+	fullPath := path.Join(v.mountPath, "metadata", dirPath)
+	secret, err := v.client.Logical().List(fullPath)
 	if err != nil {
 		return nil, errors.ErrVault.WithError(err)
 	}
@@ -96,4 +95,5 @@ func (v *vaultClientImpl) ListKeys(ctx context.Context, dirPath string) ([]strin
 func (v *vaultClientImpl) getSecretPath(keyPath string) string {
 	return path.Join(v.mountPath, "data", keyPath)
 }
+
 //Personal.AI order the ending

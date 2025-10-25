@@ -53,4 +53,5 @@ func SendError(c *gin.Context, err *errors.AppError) {
 	traceID, _ := c.Get("trace_id")
 	c.JSON(err.HTTPStatus, NewErrorResponse(err, traceID.(string)))
 }
+
 //Personal.AI order the ending

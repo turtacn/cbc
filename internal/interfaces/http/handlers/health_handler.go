@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -55,7 +56,7 @@ func (h *HealthHandler) HealthCheck(c *gin.Context) {
 		"status":    status,
 		"timestamp": time.Now().UTC(),
 		"checks":    checks,
-	} )
+	})
 }
 
 // ReadinessCheck godoc
@@ -119,4 +120,5 @@ func (h *HealthHandler) checkVault(mu *sync.Mutex, checks map[string]string) {
 	checks["vault"] = status
 	mu.Unlock()
 }
+
 //Personal.AI order the ending
