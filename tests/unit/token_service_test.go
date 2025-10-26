@@ -31,6 +31,7 @@ func TestIssueVerifyRefresh(t *testing.T) {
 
 type staticKeyRepo struct{ kid string; key []byte }
 func (s *staticKeyRepo) ActiveKey() (*models.KeyMeta, []byte, error) { return &models.KeyMeta{KID:s.kid,Alg:"HS256"}, s.key, nil }
+func (s *staticKeyRepo) CanaryKey() (*models.KeyMeta, []byte, error) { return nil, nil, nil } // No canary key in this test repo
 func (s *staticKeyRepo) FindByKID(kid string) (*models.KeyMeta, []byte, error) { return &models.KeyMeta{KID:kid,Alg:"HS256"}, s.key, nil }
 
 type memBlack struct{ m map[string]bool }

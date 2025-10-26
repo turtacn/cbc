@@ -17,10 +17,6 @@ import (
 	httpapi "github.com/turtacn/cbc/internal/interfaces/http"
 )
 
-type noopAudit struct{}
-
-func (noopAudit) Write(event string, payload map[string]any) error { return nil }
-
 func main() {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -33,7 +29,8 @@ func main() {
 
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 	keys := postgresstore.NewKeyRepo(dbpool)
-	tokens := service.NewTokenService(keys, redisstore.NewBlacklist(rdb), noopAudit{}, 15*time.Minute, 24*time.Hour)
+	audit := postgresstore.NewAuditRepo(dbpool)
+	tokens := service.NewTokenService(keys, redisstore.NewBlacklist(rdb), audit, 15*time.Minute, 24*time.Hour)
 	srv := httpapi.New(tokens)
 
 	// Add rate limiting middleware
