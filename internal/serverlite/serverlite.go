@@ -3,38 +3,40 @@ package serverlite
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/internal/domain/service"
+	redisstore "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
+	httpapi "github.com/turtacn/cbc/internal/interfaces/http"
 )
 
 // Server is a lightweight, in-memory auth server for E2E testing.
 type Server struct {
 	HttpServer *http.Server
-	revoked    sync.Map
-	signingKey []byte
 }
 
 // NewServer creates and configures a new server.
 func NewServer(addr string, signingKey []byte) *Server {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	s := &Server{
-		signingKey: signingKey,
-	}
+	gin.SetMode(gin.TestMode)
 
-	router.GET("/health", s.healthCheck)
-	router.POST("/token/issue", s.issueToken)
-	router.POST("/token/refresh", s.refreshToken)
-	router.POST("/token/revoke", s.revokeToken)
-	router.GET("/.well-known/jwks.json", s.getJWKS)
+	// Use in-memory implementations for dependencies
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"}) // Assumes a local Redis is running for tests
+	blacklist := redisstore.NewBlacklist(rdb)
+	audit := &noopAudit{}
+	keys := &staticKeyRepo{kid: "kid-1", key: signingKey}
 
-	s.HttpServer = &http.Server{
-		Addr:    addr,
-		Handler: router,
+	tokenService := service.NewTokenService(keys, blacklist, audit, 15*time.Minute, 24*time.Hour)
+	httpServer := httpapi.New(tokenService)
+
+	return &Server{
+		HttpServer: &http.Server{
+			Addr:    addr,
+			Handler: httpServer.Engine,
+		},
 	}
-	return s
 }
 
 // Start runs the server in a goroutine.
@@ -51,82 +53,21 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.HttpServer.Shutdown(ctx)
 }
 
-func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+// staticKeyRepo is a simple in-memory key repository for testing.
+type staticKeyRepo struct {
+	kid string
+	key []byte
 }
 
-func (s *Server) issueToken(c *gin.Context) {
-	var req struct {
-		TenantID string `json:"tenant_id"`
-		DeviceID string `json:"device_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
-		return
-	}
-
-	now := time.Now()
-	accessToken, _ := s.createToken("access", req.TenantID, req.DeviceID, now.Add(15*time.Minute))
-	refreshToken, _ := s.createToken("refresh", req.TenantID, req.DeviceID, now.Add(7*24*time.Hour))
-
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  accessToken,
-		"refresh_token": refreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    15 * 60,
-	})
+func (s *staticKeyRepo) ActiveKey() (*models.KeyMeta, []byte, error) {
+	return &models.KeyMeta{KID: s.kid, Alg: "HS256"}, s.key, nil
 }
 
-func (s *Server) refreshToken(c *gin.Context) {
-	var req struct {
-		RefreshToken string `json:"refresh_token"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
-		return
-	}
-
-	claims, err := s.VerifyAndParseToken(req.RefreshToken, "refresh")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
-		return
-	}
-
-	// Revoke the old refresh token
-	s.revoked.Store(claims["jti"], true)
-
-	now := time.Now()
-	newAccessToken, _ := s.createToken("access", claims["tenant_id"].(string), claims["device_id"].(string), now.Add(15*time.Minute))
-	newRefreshToken, _ := s.createToken("refresh", claims["tenant_id"].(string), claims["device_id"].(string), now.Add(7*24*time.Hour))
-
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  newAccessToken,
-		"refresh_token": newRefreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    15 * 60,
-	})
+func (s *staticKeyRepo) FindByKID(kid string) (*models.KeyMeta, []byte, error) {
+	return &models.KeyMeta{KID: kid, Alg: "HS256"}, s.key, nil
 }
 
-func (s *Server) revokeToken(c *gin.Context) {
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
-		return
-	}
+// noopAudit is a no-op audit repository for testing.
+type noopAudit struct{}
 
-	claims, err := s.VerifyAndParseToken(req.Token, "") // Allow any type
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
-		return
-	}
-
-	s.revoked.Store(claims["jti"], true)
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-}
-
-func (s *Server) getJWKS(c *gin.Context) {
-	// For HMAC, we don't expose a public key. Return an empty set.
-	c.JSON(http.StatusOK, gin.H{"keys": []interface{}{}})
-}
+func (*noopAudit) Write(event string, payload map[string]any) error { return nil }

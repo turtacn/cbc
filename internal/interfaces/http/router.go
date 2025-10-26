@@ -1,100 +1,85 @@
-package http
+// internal/interfaces/http/router.go
+package httpapi
 
 import (
-	"context"
-	"fmt"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+   "net/http"
+   "time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/turtacn/cbc/internal/config"
-	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
-	"github.com/turtacn/cbc/pkg/logger"
+   "github.com/gin-gonic/gin"
+   "github.com/turtacn/cbc/internal/domain/service"
 )
 
-// RouterDependencies holds all dependencies for the router.
-type RouterDependencies struct {
-	Config        *config.ServerConfig
-	Logger        logger.Logger
-	AuthHandler   *handlers.AuthHandler
-	DeviceHandler *handlers.DeviceHandler
-	HealthHandler *handlers.HealthHandler
-	Middleware    []gin.HandlerFunc
+type Server struct {
+   Engine *gin.Engine
+   tokens *service.TokenService
 }
 
-// NewRouter creates and configures a new Gin router.
-func NewRouter(deps RouterDependencies) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
+func New(tokens *service.TokenService) *Server {
+   r := gin.Default()
+   s := &Server{Engine: r, tokens: tokens}
 
-	// Register global middleware
-	for _, mw := range deps.Middleware {
-		router.Use(mw)
-	}
+   r.GET("/healthz", func(c *gin.Context){ c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
-	// Health checks
-	router.GET("/health", deps.HealthHandler.HealthCheck)
-	router.GET("/ready", deps.HealthHandler.ReadinessCheck)
-
-	// Metrics
-	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-
-	// API v1 routes
-	v1 := router.Group("/api/v1")
-	{
-		auth := v1.Group("/auth")
-		{
-			auth.POST("/token", deps.AuthHandler.IssueToken)
-			auth.POST("/refresh", deps.AuthHandler.RefreshToken)
-			auth.POST("/revoke", deps.AuthHandler.RevokeToken)
-			auth.GET("/jwks/:tenant_id", deps.AuthHandler.GetJWKS)
-		}
-		devices := v1.Group("/devices")
-		{
-			// These would typically be protected by an auth middleware
-			devices.POST("", deps.DeviceHandler.RegisterDevice)
-			devices.GET("/:device_id", deps.DeviceHandler.GetDevice)
-			devices.PUT("/:device_id", deps.DeviceHandler.UpdateDevice)
-		}
-	}
-
-	return router
+   r.POST("/token/issue", s.issue)
+   r.POST("/token/refresh", s.refresh)
+   r.POST("/token/revoke", s.revoke)
+   r.POST("/token/verify", s.verify)
+   return s
 }
 
-// StartServer starts the HTTP server and handles graceful shutdown.
-func StartServer(router *gin.Engine, cfg *config.ServerConfig, log logger.Logger) {
-	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      router,
-		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
-	}
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal(context.Background(), "Failed to start HTTP server", err)
-		}
-	}()
-
-	log.Info(context.Background(), fmt.Sprintf("HTTP server listening on :%d", cfg.Port))
-
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Info(context.Background(), "Shutting down HTTP server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error(context.Background(), "HTTP server shutdown failed", err)
-	} else {
-		log.Info(context.Background(), "HTTP server gracefully stopped")
-	}
+type issueReq struct {
+   TenantID string   `json:"tenant_id" binding:"required"`
+   UserID   string   `json:"user_id" binding:"required"`
+   DeviceID string   `json:"device_id" binding:"required"`
+   Scope    []string `json:"scope"`
 }
 
-//Personal.AI order the ending
+func (s *Server) issue(c *gin.Context) {
+   var in issueReq
+   if err := c.ShouldBindJSON(&in); err != nil {
+      c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()}); return
+   }
+   pair, err := s.tokens.Issue(c, service.IssueInput{
+      TenantID: in.TenantID, UserID: in.UserID, DeviceID: in.DeviceID, Scope: in.Scope,
+   })
+   if err != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()}); return }
+   c.JSON(http.StatusOK, gin.H{"access_token": pair.AccessToken, "refresh_token": pair.RefreshToken, "expires_in": int((15*time.Minute).Seconds())})
+}
+
+func (s *Server) refresh(c *gin.Context) {
+   var body struct{ RefreshToken string `json:"refresh_token" binding:"required"` }
+   if err := c.ShouldBindJSON(&body); err != nil {
+      c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()}); return
+   }
+   pair, err := s.tokens.Refresh(c, body.RefreshToken)
+   if err != nil { c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()}); return }
+   c.JSON(http.StatusOK, gin.H{"access_token": pair.AccessToken, "refresh_token": pair.RefreshToken})
+}
+
+func (s *Server) verify(c *gin.Context) {
+	var body struct {
+		Token string `json:"token" binding:"required"`
+		Typ   string `json:"typ" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	res, err := s.tokens.Verify(c, body.Token, body.Typ)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"valid": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"valid": true, "claims": res.Claims})
+}
+
+func (s *Server) revoke(c *gin.Context) {
+   var body struct{ JTI string `json:"jti" binding:"required"` }
+   if err := c.ShouldBindJSON(&body); err != nil {
+      c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()}); return
+   }
+   if err := s.tokens.Revoke(c, body.JTI); err != nil {
+      c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()}); return
+   }
+   c.JSON(http.StatusOK, gin.H{"ok": true})
+}

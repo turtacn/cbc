@@ -1,38 +1,46 @@
+// cmd/server/main.go
 package main
 
 import (
 	"context"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
+	"net/http"
 	"time"
 
-	"github.com/turtacn/cbc/internal/serverlite"
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+	"github.com/turtacn/cbc/internal/domain/service"
+	postgresstore "github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
+	redisstore "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
+	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
+	httpapi "github.com/turtacn/cbc/internal/interfaces/http"
 )
 
+type noopAudit struct{}
+
+func (noopAudit) Write(event string, payload map[string]any) error { return nil }
+
 func main() {
-	// For simplicity, we'll use a hardcoded signing key for the E2E server.
-	// In a real application, this would come from a secure configuration source.
-	signingKey := []byte("your-super-secret-hmac-key-for-e2e-testing")
+	gin.SetMode(gin.ReleaseMode)
 
-	// Create and start the lightweight server
-	server := serverlite.NewServer(":8080", signingKey)
-	server.Start()
-	log.Println("E2E serverlite started on :8080")
-
-	// Wait for termination signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
-
-	// Gracefully shutdown the server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Stop(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	// In a real application, the database connection string would come from a config file.
+	dbpool, err := pgxpool.New(context.Background(), "postgres://user:password@localhost:5432/testdb")
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
+	defer dbpool.Close()
 
-	log.Println("Server exiting")
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	keys := postgresstore.NewKeyRepo(dbpool)
+	tokens := service.NewTokenService(keys, redisstore.NewBlacklist(rdb), noopAudit{}, 15*time.Minute, 24*time.Hour)
+	srv := httpapi.New(tokens)
+
+	// Add rate limiting middleware
+	srv.Engine.Use(ratelimit.FixedWindow(rdb, 100, time.Minute, func(c *gin.Context) string {
+		return c.ClientIP()
+	}))
+
+	log.Println("listening on :8080")
+	_ = http.ListenAndServe(":8080", srv.Engine)
 }
