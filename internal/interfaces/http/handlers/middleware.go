@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"runtime/debug"
@@ -10,15 +9,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"cbc-auth-service/internal/application/dto"
-	"cbc-auth-service/internal/domain/service"
-	"cbc-auth-service/internal/infrastructure/crypto"
-	"cbc-auth-service/pkg/errors"
-	"cbc-auth-service/pkg/logger"
+	"github.com/turtacn/cbc/internal/application/dto"
+	"github.com/turtacn/cbc/internal/domain/service"
+	"github.com/turtacn/cbc/internal/infrastructure/crypto"
+	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
 // MiddlewareConfig 中间件配置
@@ -80,23 +79,23 @@ func LoggingMiddleware(log logger.Logger) gin.HandlerFunc {
 		userAgent := c.Request.UserAgent()
 
 		// 记录日志
-		fields := map[string]interface{}{
-			"method":      method,
-			"path":        path,
-			"status":      statusCode,
-			"latency_ms":  latency.Milliseconds(),
-			"client_ip":   clientIP,
-			"user_agent":  userAgent,
-			"request_id":  requestID,
-			"trace_id":    traceID,
+		logFields := []logger.Field{
+			logger.String("method", method),
+			logger.String("path", path),
+			logger.Int("status", statusCode),
+			logger.Int64("latency_ms", latency.Milliseconds()),
+			logger.String("client_ip", clientIP),
+			logger.String("user_agent", userAgent),
+			logger.String("request_id", requestID),
+			logger.String("trace_id", traceID),
 		}
 
 		if statusCode >= 500 {
-			log.Error("HTTP request failed", fields)
+			log.Error(c.Request.Context(), "HTTP request failed", nil, logFields...)
 		} else if statusCode >= 400 {
-			log.Warn("HTTP request error", fields)
+			log.Warn(c.Request.Context(), "HTTP request error", logFields...)
 		} else {
-			log.Info("HTTP request completed", fields)
+			log.Info(c.Request.Context(), "HTTP request completed", logFields...)
 		}
 	}
 }
@@ -113,25 +112,16 @@ func RecoveryMiddleware(log logger.Logger) gin.HandlerFunc {
 				traceID, _ := c.Get("trace_id")
 
 				// 记录错误日志
-				log.Error("Panic recovered", map[string]interface{}{
-					"error":      fmt.Sprintf("%v", err),
-					"stack":      stack,
-					"request_id": requestID,
-					"trace_id":   traceID,
-					"path":       c.Request.URL.Path,
-					"method":     c.Request.Method,
-				})
+				log.Error(c.Request.Context(), "Panic recovered", fmt.Errorf("%v", err),
+					logger.String("stack", stack),
+					logger.Any("request_id", requestID),
+					logger.Any("trace_id", traceID),
+					logger.String("path", c.Request.URL.Path),
+					logger.String("method", c.Request.Method),
+				)
 
 				// 返回标准错误响应
-				response := dto.ErrorResponse{
-					Success: false,
-					Error: &dto.ErrorDetail{
-						Code:    "INTERNAL_SERVER_ERROR",
-						Message: "An internal server error occurred",
-					},
-					RequestID: fmt.Sprintf("%v", requestID),
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				}
+				response := dto.ErrorResponse(fmt.Errorf("%v", err), fmt.Sprintf("%v", traceID))
 
 				c.JSON(http.StatusInternalServerError, response)
 				c.Abort()
@@ -158,12 +148,10 @@ func TracingMiddleware(tracer trace.Tracer) gin.HandlerFunc {
 
 		// 设置 Span 属性
 		span.SetAttributes(
-			trace.WithAttributes(
-				trace.StringAttribute("http.method", c.Request.Method),
-				trace.StringAttribute("http.url", c.Request.URL.String()),
-				trace.StringAttribute("http.client_ip", c.ClientIP()),
-				trace.StringAttribute("trace_id", traceID),
-			)...,
+			attribute.String("http.method", c.Request.Method),
+			attribute.String("http.url", c.Request.URL.String()),
+			attribute.String("http.client_ip", c.ClientIP()),
+			attribute.String("trace_id", traceID),
 		)
 
 		// 将 Context 注入到 Gin Context
@@ -175,7 +163,7 @@ func TracingMiddleware(tracer trace.Tracer) gin.HandlerFunc {
 
 		// 记录响应状态
 		statusCode := c.Writer.Status()
-		span.SetAttributes(trace.IntAttribute("http.status_code", statusCode))
+		span.SetAttributes(attribute.Int("http.status_code", statusCode))
 
 		if statusCode >= 400 {
 			span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", statusCode))
@@ -192,49 +180,40 @@ func RateLimitMiddleware(rateLimitService service.RateLimitService, log logger.L
 
 		// 提取限流标识符（优先级：Agent ID > Tenant ID > IP）
 		var identifier string
-		var scope string
+		var dimension service.RateLimitDimension
 
 		// 从 JWT Token 中提取 AgentID 和 TenantID（如果已认证）
 		if agentID, exists := c.Get("agent_id"); exists {
-			identifier = fmt.Sprintf("agent:%s", agentID)
-			scope = "agent"
+			identifier = fmt.Sprintf("%s", agentID)
+			dimension = service.RateLimitDimensionDevice
 		} else if tenantID, exists := c.Get("tenant_id"); exists {
-			identifier = fmt.Sprintf("tenant:%s", tenantID)
-			scope = "tenant"
+			identifier = fmt.Sprintf("%s", tenantID)
+			dimension = service.RateLimitDimensionTenant
 		} else {
-			identifier = fmt.Sprintf("ip:%s", c.ClientIP())
-			scope = "global"
+			identifier = c.ClientIP()
+			dimension = service.RateLimitDimensionIP
 		}
 
 		// 检查限流
-		allowed, err := rateLimitService.CheckRateLimit(ctx, identifier, scope)
+		allowed, _, _, err := rateLimitService.Allow(ctx, dimension, identifier, c.Request.URL.Path)
 		if err != nil {
-			log.Error("Rate limit check failed", map[string]interface{}{
-				"error":      err.Error(),
-				"identifier": identifier,
-				"scope":      scope,
-			})
+			log.Error(ctx, "Rate limit check failed", err,
+				logger.String("identifier", identifier),
+				logger.String("dimension", string(dimension)),
+			)
 			// 限流检查失败时，选择宽松策略（允许通过）
 			c.Next()
 			return
 		}
 
 		if !allowed {
-			log.Warn("Rate limit exceeded", map[string]interface{}{
-				"identifier": identifier,
-				"scope":      scope,
-				"path":       c.Request.URL.Path,
-			})
+			log.Warn(ctx, "Rate limit exceeded",
+				logger.String("identifier", identifier),
+				logger.String("dimension", string(dimension)),
+				logger.String("path", c.Request.URL.Path),
+			)
 
-			response := dto.ErrorResponse{
-				Success: false,
-				Error: &dto.ErrorDetail{
-					Code:    "RATE_LIMIT_EXCEEDED",
-					Message: "Too many requests, please try again later",
-				},
-				RequestID: c.GetString("request_id"),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
+			response := dto.ErrorResponse(errors.ErrRateLimitExceeded(string(dimension), 0), c.GetString("trace_id"))
 
 			c.Header("Retry-After", "60")
 			c.JSON(http.StatusTooManyRequests, response)
@@ -270,20 +249,16 @@ func AuthMiddleware(jwtManager crypto.JWTManager, log logger.Logger) gin.Handler
 		// 验证 JWT
 		claims, err := jwtManager.VerifyJWT(ctx, tokenString)
 		if err != nil {
-			log.Warn("JWT verification failed", map[string]interface{}{
-				"error": err.Error(),
-				"path":  c.Request.URL.Path,
-			})
+			log.Warn(ctx, "JWT verification failed",
+				logger.Error(err),
+				logger.String("path", c.Request.URL.Path),
+			)
 
 			var errorCode, errorMsg string
-			switch {
-			case errors.IsTokenExpiredError(err):
-				errorCode = "TOKEN_EXPIRED"
-				errorMsg = "Token has expired"
-			case errors.IsTokenInvalidError(err):
-				errorCode = "INVALID_TOKEN"
-				errorMsg = "Token is invalid"
-			default:
+			if cbcErr, ok := errors.AsCBCError(err); ok {
+				errorCode = string(cbcErr.Code())
+				errorMsg = cbcErr.Error()
+			} else {
 				errorCode = "AUTHENTICATION_FAILED"
 				errorMsg = "Authentication failed"
 			}
@@ -304,16 +279,7 @@ func AuthMiddleware(jwtManager crypto.JWTManager, log logger.Logger) gin.Handler
 
 // respondUnauthorized 返回 401 未授权错误
 func respondUnauthorized(c *gin.Context, code, message string) {
-	response := dto.ErrorResponse{
-		Success: false,
-		Error: &dto.ErrorDetail{
-			Code:    code,
-			Message: message,
-		},
-		RequestID: c.GetString("request_id"),
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
+	response := dto.ErrorResponse(errors.ErrInvalidClient(message), c.GetString("trace_id"))
 	c.JSON(http.StatusUnauthorized, response)
 	c.Abort()
 }
@@ -337,5 +303,3 @@ func SetupMiddlewares(router *gin.Engine, config *MiddlewareConfig) {
 
 	// 注意：AuthMiddleware 不在全局应用，只在需要认证的路由组中使用
 }
-
-//Personal.AI order the ending

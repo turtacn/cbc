@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -55,7 +56,7 @@ func (h *HealthHandler) HealthCheck(c *gin.Context) {
 	if err := h.checkDatabase(ctx); err != nil {
 		checks["database"] = "unhealthy: " + err.Error()
 		allHealthy = false
-		h.logger.Error("Database health check failed", "error", err)
+		h.logger.Error(ctx, "Database health check failed", err)
 	} else {
 		checks["database"] = "ok"
 	}
@@ -64,7 +65,7 @@ func (h *HealthHandler) HealthCheck(c *gin.Context) {
 	if err := h.checkRedis(ctx); err != nil {
 		checks["redis"] = "unhealthy: " + err.Error()
 		allHealthy = false
-		h.logger.Error("Redis health check failed", "error", err)
+		h.logger.Error(ctx, "Redis health check failed", err)
 	} else {
 		checks["redis"] = "ok"
 	}
@@ -73,7 +74,7 @@ func (h *HealthHandler) HealthCheck(c *gin.Context) {
 	if err := h.checkVault(ctx); err != nil {
 		checks["vault"] = "unhealthy: " + err.Error()
 		allHealthy = false
-		h.logger.Error("Vault health check failed", "error", err)
+		h.logger.Error(ctx, "Vault health check failed", err)
 	} else {
 		checks["vault"] = "ok"
 	}
@@ -153,26 +154,18 @@ func (h *HealthHandler) LivenessCheck(c *gin.Context) {
 
 // checkDatabase 检查数据库连接
 func (h *HealthHandler) checkDatabase(ctx context.Context) error {
-	pool := h.dbConn.GetPool()
-	if pool == nil {
-		return logger.NewError("database connection pool is nil")
+	if h.dbConn == nil {
+		return fmt.Errorf("database connection is nil")
 	}
 
-	// 执行简单查询验证连接
-	var result int
-	err := pool.QueryRow(ctx, "SELECT 1").Scan(&result)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return h.dbConn.Ping(ctx)
 }
 
 // checkRedis 检查 Redis 连接
 func (h *HealthHandler) checkRedis(ctx context.Context) error {
 	client := h.redisConn.GetClient()
 	if client == nil {
-		return logger.NewError("redis client is nil")
+		return fmt.Errorf("redis client is nil")
 	}
 
 	// 执行 PING 命令验证连接
@@ -187,20 +180,18 @@ func (h *HealthHandler) checkRedis(ctx context.Context) error {
 // checkVault 检查 Vault 连接
 func (h *HealthHandler) checkVault(ctx context.Context) error {
 	if h.vaultClient == nil {
-		return logger.NewError("vault client is nil")
+		return fmt.Errorf("vault client is nil")
 	}
 
 	// 检查 Vault 健康状态
-	healthy, err := h.vaultClient.HealthCheck(ctx)
+	healthy, err := h.vaultClient.Health(ctx)
 	if err != nil {
 		return err
 	}
 
 	if !healthy {
-		return logger.NewError("vault is not healthy")
+		return fmt.Errorf("vault is not healthy")
 	}
 
 	return nil
 }
-
-//Personal.AI order the ending

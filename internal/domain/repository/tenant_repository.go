@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/constants"
 )
 
 // TenantRepository 定义租户仓储接口
@@ -86,7 +87,7 @@ type TenantRepository interface {
 	//   - status: 新的租户状态
 	// 返回：
 	//   - error: 更新失败时返回错误
-	UpdateStatus(ctx context.Context, tenantID string, status models.TenantStatus) error
+	UpdateStatus(ctx context.Context, tenantID string, status constants.TenantStatus) error
 
 	// UpdateRateLimitConfig 更新租户的速率限制配置
 	// 参数：
@@ -195,25 +196,25 @@ type SystemMetrics struct {
 	AverageQPS          float64                      // 平均 QPS
 	PeakQPS             float64                      // 峰值 QPS
 	SuccessRequestRate  float64                      // 请求成功率（%）
-	AverageLatencyMs    float64                      // 平均延迟（毫秒）
-	P95LatencyMs        float64                      // P95 延迟（毫秒）
-	P99LatencyMs        float64                      // P99 延迟（毫秒）
-	RateLimitHitsToday  int64                        // 今日限流触发次数
-	ByStatus            map[models.TenantStatus]int64 // 按状态统计租户数
-	StorageUsedGB       float64                      // 存储使用量（GB）
-	BandwidthUsedGB     float64                      // 带宽使用量（GB）
-	TotalMonthlyRevenue float64                      // 当月总收入（美元）
+	AverageLatencyMs    float64                        // 平均延迟（毫秒）
+	P95LatencyMs        float64                        // P95 延迟（毫秒）
+	P99LatencyMs        float64                        // P99 延迟（毫秒）
+	RateLimitHitsToday  int64                          // 今日限流触发次数
+	ByStatus            map[constants.TenantStatus]int64 // 按状态统计租户数
+	StorageUsedGB       float64                        // 存储使用量（GB）
+	BandwidthUsedGB     float64                        // 带宽使用量（GB）
+	TotalMonthlyRevenue float64                        // 当月总收入（美元）
 }
 
 // TenantQuery 租户查询参数
 // 用于复杂查询场景（如管理端的租户列表筛选）
 type TenantQuery struct {
-	TenantID         string              // 租户 ID（可选，模糊匹配）
-	Name             string              // 租户名称（可选，模糊匹配）
-	Status           models.TenantStatus // 租户状态（可选）
-	CreatedAfter     *time.Time          // 创建时间下界（可选）
-	CreatedBefore    *time.Time          // 创建时间上界（可选）
-	LastActivityAfter  *time.Time        // 最后活跃时间下界（可选）
+	TenantID         string                // 租户 ID（可选，模糊匹配）
+	Name             string                // 租户名称（可选，模糊匹配）
+	Status           constants.TenantStatus // 租户状态（可选）
+	CreatedAfter     *time.Time            // 创建时间下界（可选）
+	CreatedBefore    *time.Time            // 创建时间上界（可选）
+	LastActivityAfter  *time.Time          // 最后活跃时间下界（可选）
 	LastActivityBefore *time.Time        // 最后活跃时间上界（可选）
 	MinDevices       int64               // 最小设备数（可选）
 	MaxDevices       int64               // 最大设备数（可选）

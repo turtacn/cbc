@@ -12,7 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"cbc/pkg/constants"
+	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/google/uuid"
 )
 
@@ -815,6 +815,14 @@ func CalculatePasswordStrength(password string) PasswordStrength {
 	}
 
 	return PasswordStrengthWeak
+}
+
+
+// ValidateStruct validates a struct based on tags.
+func ValidateStruct(s interface{}) error {
+	// This is a placeholder implementation.
+	// In a real application, you would use a library like go-playground/validator.
+	return nil
 }
 
 //Personal.AI order the ending

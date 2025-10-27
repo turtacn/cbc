@@ -55,11 +55,12 @@ type DatabaseConfig struct {
 	Password        string        `mapstructure:"password" env:"CBC_AUTH_DB_PASSWORD"`
 	Database        string        `mapstructure:"database" env:"CBC_AUTH_DB_NAME" default:"cbc_auth_db"`
 	SSLMode         string        `mapstructure:"ssl_mode" env:"CBC_AUTH_DB_SSL_MODE" default:"require"`
-	MaxConns        int32         `mapstructure:"max_conns" env:"CBC_AUTH_DB_MAX_CONNS" default:"100"`
-	MinConns        int32         `mapstructure:"min_conns" env:"CBC_AUTH_DB_MIN_CONNS" default:"10"`
-	MaxConnLifetime time.Duration `mapstructure:"max_conn_lifetime" env:"CBC_AUTH_DB_MAX_CONN_LIFETIME" default:"1h"`
-	MaxConnIdleTime time.Duration `mapstructure:"max_conn_idle_time" env:"CBC_AUTH_DB_MAX_CONN_IDLE_TIME" default:"30m"`
-	ConnectTimeout  time.Duration `mapstructure:"connect_timeout" env:"CBC_AUTH_DB_CONNECT_TIMEOUT" default:"10s"`
+	MaxConns          int32         `mapstructure:"max_conns" env:"CBC_AUTH_DB_MAX_CONNS" default:"100"`
+	MinConns          int32         `mapstructure:"min_conns" env:"CBC_AUTH_DB_MIN_CONNS" default:"10"`
+	MaxConnLifetime   time.Duration `mapstructure:"max_conn_lifetime" env:"CBC_AUTH_DB_MAX_CONN_LIFETIME" default:"1h"`
+	MaxConnIdleTime   time.Duration `mapstructure:"max_conn_idle_time" env:"CBC_AUTH_DB_MAX_CONN_IDLE_TIME" default:"30m"`
+	HealthCheckPeriod time.Duration `mapstructure:"health_check_period" env:"CBC_AUTH_DB_HEALTH_CHECK_PERIOD" default:"5m"`
+	ConnTimeout       time.Duration `mapstructure:"conn_timeout" env:"CBC_AUTH_DB_CONN_TIMEOUT" default:"10s"`
 }
 
 // RedisConfig Redis 配置
@@ -371,7 +372,7 @@ func (r *RateLimitConfig) Validate() error {
 
 // Validate LogConfig
 func (l *LogConfig) Validate() error {
-	validLevels := []string{constants.LogLevelDebug, constants.LogLevelInfo, constants.LogLevelWarn, constants.LogLevelError, constants.LogLevelFatal}
+	validLevels := []string{string(constants.LogLevelDebug), string(constants.LogLevelInfo), string(constants.LogLevelWarn), string(constants.LogLevelError), string(constants.LogLevelFatal)}
 	levelValid := false
 	for _, level := range validLevels {
 		if l.Level == level {

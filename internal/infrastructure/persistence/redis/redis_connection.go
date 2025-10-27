@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"sangfor.local/hci/hci-common/utils/redis"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -99,7 +98,7 @@ func NewRedisConnection(config *Config, log logger.Logger) *RedisConnection {
 //   - error: Connection establishment error if any
 func (rc *RedisConnection) Connect() error {
 	if rc.isInitialized {
-		rc.logger.Warn("Redis connection already initialized")
+		rc.logger.Warn(context.Background(), "Redis connection already initialized")
 		return nil
 	}
 
@@ -121,9 +120,8 @@ func (rc *RedisConnection) Connect() error {
 	}
 
 	if err != nil {
-		rc.logger.Error("Failed to establish Redis connection",
-			"mode", rc.config.Mode,
-			"error", err,
+		rc.logger.Error(context.Background(), "Failed to establish Redis connection", err,
+			logger.String("mode", string(rc.config.Mode)),
 		)
 		return fmt.Errorf("redis connection failed: %w", err)
 	}
@@ -135,15 +133,15 @@ func (rc *RedisConnection) Connect() error {
 	defer cancel()
 
 	if err := rc.client.Ping(ctx).Err(); err != nil {
-		rc.logger.Error("Redis ping failed", "error", err)
+		rc.logger.Error(ctx, "Redis ping failed", err)
 		_ = rc.client.Close()
 		return fmt.Errorf("redis ping failed: %w", err)
 	}
 
 	rc.isInitialized = true
-	rc.logger.Info("Redis connection established successfully",
-		"mode", rc.config.Mode,
-		"pool_size", rc.config.PoolSize,
+	rc.logger.Info(ctx, "Redis connection established successfully",
+		logger.String("mode", string(rc.config.Mode)),
+		logger.Int("pool_size", rc.config.PoolSize),
 	)
 
 	return nil
@@ -184,9 +182,9 @@ func (rc *RedisConnection) connectStandalone() (redis.UniversalClient, error) {
 		opts.TLSConfig = tlsConfig
 	}
 
-	rc.logger.Info("Connecting to Redis standalone",
-		"addr", addr,
-		"db", rc.config.DB,
+	rc.logger.Info(context.Background(), "Connecting to Redis standalone",
+		logger.String("addr", addr),
+		logger.Int("db", rc.config.DB),
 	)
 
 	return redis.NewClient(opts), nil
@@ -228,8 +226,8 @@ func (rc *RedisConnection) connectCluster() (redis.UniversalClient, error) {
 		opts.TLSConfig = tlsConfig
 	}
 
-	rc.logger.Info("Connecting to Redis cluster",
-		"addrs", rc.config.ClusterAddrs,
+	rc.logger.Info(context.Background(), "Connecting to Redis cluster",
+		logger.Any("addrs", rc.config.ClusterAddrs),
 	)
 
 	return redis.NewClusterClient(opts), nil
@@ -276,9 +274,9 @@ func (rc *RedisConnection) connectSentinel() (redis.UniversalClient, error) {
 		opts.TLSConfig = tlsConfig
 	}
 
-	rc.logger.Info("Connecting to Redis sentinel",
-		"master", rc.config.SentinelMaster,
-		"sentinels", rc.config.SentinelAddrs,
+	rc.logger.Info(context.Background(), "Connecting to Redis sentinel",
+		logger.String("master", rc.config.SentinelMaster),
+		logger.Any("sentinels", rc.config.SentinelAddrs),
 	)
 
 	return redis.NewFailoverClient(opts), nil
@@ -294,7 +292,7 @@ func (rc *RedisConnection) buildTLSConfig() (*tls.Config, error) {
 	if rc.config.TLSCertFile != "" && rc.config.TLSKeyFile != "" {
 		// Certificate loading would be implemented here
 		// For now, using basic config
-		rc.logger.Info("TLS enabled for Redis connection")
+		rc.logger.Info(context.Background(), "TLS enabled for Redis connection")
 	}
 
 	return tlsConfig, nil
@@ -368,7 +366,7 @@ func (rc *RedisConnection) Ping(ctx context.Context) error {
 	}
 
 	if err := rc.client.Ping(ctx).Err(); err != nil {
-		rc.logger.Error("Redis ping failed", "error", err)
+		rc.logger.Error(ctx, "Redis ping failed", err)
 		return err
 	}
 
@@ -413,15 +411,15 @@ func (rc *RedisConnection) HealthCheck(ctx context.Context) (map[string]interfac
 	health["stale_conns"] = stats.StaleConns
 
 	// Get server info
-	info, err := rc.client.Info(ctx, "server", "memory", "stats").Result()
+	_, err = rc.client.Info(ctx, "server", "memory", "stats").Result()
 	if err == nil {
 		health["server_info"] = "available"
 	}
 
-	rc.logger.Debug("Redis health check completed",
-		"connected", health["connected"],
-		"latency_ms", health["latency_ms"],
-		"total_conns", health["total_conns"],
+	rc.logger.Debug(ctx, "Redis health check completed",
+		logger.Any("connected", health["connected"]),
+		logger.Any("latency_ms", health["latency_ms"]),
+		logger.Any("total_conns", health["total_conns"]),
 	)
 
 	return health, nil
@@ -446,17 +444,17 @@ func (rc *RedisConnection) GetPoolStats() *redis.PoolStats {
 //   - error: Closure error if any
 func (rc *RedisConnection) Close() error {
 	if !rc.isInitialized {
-		rc.logger.Warn("Redis connection not initialized, nothing to close")
+		rc.logger.Warn(context.Background(), "Redis connection not initialized, nothing to close")
 		return nil
 	}
 
 	if err := rc.client.Close(); err != nil {
-		rc.logger.Error("Failed to close Redis connection", "error", err)
+		rc.logger.Error(context.Background(), "Failed to close Redis connection", err)
 		return err
 	}
 
 	rc.isInitialized = false
-	rc.logger.Info("Redis connection closed successfully")
+	rc.logger.Info(context.Background(), "Redis connection closed successfully")
 	return nil
 }
 
@@ -480,7 +478,7 @@ func (rc *RedisConnection) IsConnected() bool {
 // Returns:
 //   - error: Reconnection error if any
 func (rc *RedisConnection) Reconnect() error {
-	rc.logger.Info("Attempting to reconnect to Redis")
+	rc.logger.Info(context.Background(), "Attempting to reconnect to Redis")
 
 	// Close existing connection if any
 	if rc.isInitialized {
@@ -505,11 +503,11 @@ func (rc *RedisConnection) FlushDB(ctx context.Context) error {
 	}
 
 	if err := rc.client.FlushDB(ctx).Err(); err != nil {
-		rc.logger.Error("Failed to flush Redis database", "error", err)
+		rc.logger.Error(ctx, "Failed to flush Redis database", err)
 		return err
 	}
 
-	rc.logger.Warn("Redis database flushed successfully")
+	rc.logger.Warn(ctx, "Redis database flushed successfully")
 	return nil
 }
 
@@ -540,10 +538,10 @@ func (rc *RedisConnection) WaitForConnection(ctx context.Context, checkInterval 
 			return ctx.Err()
 		case <-ticker.C:
 			if rc.IsConnected() {
-				rc.logger.Info("Redis connection established")
+				rc.logger.Info(ctx, "Redis connection established")
 				return nil
 			}
-			rc.logger.Debug("Waiting for Redis connection...")
+			rc.logger.Debug(ctx, "Waiting for Redis connection...")
 		}
 	}
 }

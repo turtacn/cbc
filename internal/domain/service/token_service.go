@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/constants"
 )
 
 // TokenService Token 领域服务接口
@@ -63,7 +64,7 @@ type TokenService interface {
 	VerifyToken(
 		ctx context.Context,
 		tokenString string,
-		tokenType models.TokenType,
+		tokenType constants.TokenType,
 		tenantID string,
 	) (*models.Token, error)
 

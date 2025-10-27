@@ -1,3 +1,5 @@
+//go:build !test
+
 package main
 
 import (
@@ -11,10 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -27,6 +26,7 @@ import (
 	"github.com/turtacn/cbc/internal/config"
 
 	// 领域层
+	"github.com/turtacn/cbc/internal/domain/repository"
 	domainService "github.com/turtacn/cbc/internal/domain/service"
 
 	// 基础设施层
@@ -37,9 +37,9 @@ import (
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
 
 	// 接口层
-	"github.com/turtacn/cbc/internal/interfaces/grpc"
+	grpcInterface "github.com/turtacn/cbc/internal/interfaces/grpc"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
-	"github.com/turtacn/cbc/internal/interfaces/http/router"
+	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 
 	// 公共包
 	"github.com/turtacn/cbc/pkg/logger"
@@ -70,8 +70,8 @@ type Application struct {
 	logger logger.Logger
 
 	// 数据库连接
-	pgPool      *pgxpool.Pool
-	redisClient *redis.ClusterClient
+	dbConn      *postgres.DBConnection
+	redisClient *redisInfra.RedisConnection
 
 	// 基础设施组件
 	vaultClient  *crypto.VaultClient
@@ -82,17 +82,16 @@ type Application struct {
 
 	// 监控组件
 	metrics *monitoring.Metrics
-	tracer  *monitoring.Tracer
 
 	// 仓储实现
-	tokenRepo  *postgres.TokenRepositoryImpl
-	deviceRepo *postgres.DeviceRepositoryImpl
-	tenantRepo *postgres.TenantRepositoryImpl
+	tokenRepo  repository.TokenRepository
+	deviceRepo repository.DeviceRepository
+	tenantRepo repository.TenantRepository
 
 	// 应用服务
-	authAppService   *service.AuthAppService
-	deviceAppService *service.DeviceAppService
-	tenantAppService *service.TenantAppService
+	authAppService   service.AuthAppService
+	deviceAppService service.DeviceAppService
+	tenantAppService service.TenantAppService
 
 	// HTTP 服务
 	httpServer *http.Server
@@ -110,7 +109,7 @@ type Application struct {
 	cancel context.CancelFunc
 }
 
-func main() {
+func realMain() {
 	// 创建应用实例
 	app, err := NewApplication()
 	if err != nil {
@@ -120,7 +119,7 @@ func main() {
 
 	// 启动应用
 	if err := app.Start(); err != nil {
-		app.logger.Error("Failed to start application", zap.Error(err))
+		app.logger.Error(context.Background(), "Failed to start application", err)
 		os.Exit(1)
 	}
 
@@ -129,11 +128,11 @@ func main() {
 
 	// 优雅关闭
 	if err := app.Shutdown(); err != nil {
-		app.logger.Error("Failed to shutdown gracefully", zap.Error(err))
+		app.logger.Error(context.Background(), "Failed to shutdown gracefully", err)
 		os.Exit(1)
 	}
 
-	app.logger.Info("Application stopped successfully")
+	app.logger.Info(context.Background(), "Application stopped successfully")
 }
 
 // NewApplication 创建应用实例
@@ -157,9 +156,8 @@ func NewApplication() (*Application, error) {
 		return nil, fmt.Errorf("init logger: %w", err)
 	}
 
-	app.logger.Info("Starting CBC Auth Service",
-		zap.String("version", ServiceVersion),
-		zap.String("environment", app.config.Environment),
+	app.logger.Info(context.Background(), "Starting CBC Auth Service",
+		logger.String("version", ServiceVersion),
 	)
 
 	// 3. 初始化数据库连接
@@ -202,7 +200,8 @@ func NewApplication() (*Application, error) {
 
 // loadConfig 加载配置
 func (app *Application) loadConfig() error {
-	cfg, err := config.LoadConfig()
+	loader := config.NewLoader()
+	cfg, err := loader.Load()
 	if err != nil {
 		return err
 	}
@@ -213,15 +212,8 @@ func (app *Application) loadConfig() error {
 
 // initLogger 初始化日志
 func (app *Application) initLogger() error {
-	log, err := logger.NewZapLogger(
-		app.config.Logger.Level,
-		app.config.Logger.Format,
-		app.config.Logger.OutputPaths,
-	)
-	if err != nil {
-		return err
-	}
-
+	// TODO: Implement a logger that reads from the config.
+	log := logger.NewDefaultLogger()
 	app.logger = log
 	return nil
 }
@@ -229,46 +221,54 @@ func (app *Application) initLogger() error {
 // initDatabase 初始化数据库连接
 func (app *Application) initDatabase() error {
 	// PostgreSQL 连接池
-	pgPool, err := postgres.NewConnectionPool(
+	dbConn, err := postgres.NewDBConnection(
 		app.ctx,
-		app.config.Database.PostgreSQL.DSN,
-		app.config.Database.PostgreSQL.MaxConns,
-		app.config.Database.PostgreSQL.MinConns,
+		&app.config.Database,
+		app.logger,
 	)
 	if err != nil {
 		return fmt.Errorf("create postgres pool: %w", err)
 	}
-	app.pgPool = pgPool
+	app.dbConn = dbConn
 
 	// 验证连接
-	if err := pgPool.Ping(app.ctx); err != nil {
+	if err := dbConn.Ping(app.ctx); err != nil {
 		return fmt.Errorf("ping postgres: %w", err)
 	}
 
-	app.logger.Info("PostgreSQL connected",
-		zap.String("host", app.config.Database.PostgreSQL.Host),
-		zap.Int("max_conns", app.config.Database.PostgreSQL.MaxConns),
+	app.logger.Info(context.Background(), "PostgreSQL connected",
+		logger.String("host", app.config.Database.Host),
 	)
 
 	// Redis 集群客户端
-	redisClient, err := redisInfra.NewClusterClient(
-		app.config.Database.Redis.Addrs,
-		app.config.Database.Redis.Password,
-		app.config.Database.Redis.PoolSize,
+	redisConfig := &redisInfra.Config{
+		Mode:         redisInfra.ConnectionMode(app.config.Redis.Address),
+		ClusterAddrs: app.config.Redis.ClusterAddrs,
+		Password:     app.config.Redis.Password,
+		DB:           app.config.Redis.DB,
+		PoolSize:     app.config.Redis.PoolSize,
+		MinIdleConns: app.config.Redis.MinIdleConns,
+		MaxRetries:   app.config.Redis.MaxRetries,
+		DialTimeout:  app.config.Redis.DialTimeout,
+		ReadTimeout:  app.config.Redis.ReadTimeout,
+		WriteTimeout: app.config.Redis.WriteTimeout,
+	}
+	redisClient := redisInfra.NewRedisConnection(
+		redisConfig,
+		app.logger,
 	)
-	if err != nil {
+	if err := redisClient.Connect(); err != nil {
 		return fmt.Errorf("create redis client: %w", err)
 	}
 	app.redisClient = redisClient
 
 	// 验证连接
-	if err := redisClient.Ping(app.ctx).Err(); err != nil {
+	if err := redisClient.Ping(app.ctx); err != nil {
 		return fmt.Errorf("ping redis: %w", err)
 	}
 
-	app.logger.Info("Redis cluster connected",
-		zap.Strings("addrs", app.config.Database.Redis.Addrs),
-		zap.Int("pool_size", app.config.Database.Redis.PoolSize),
+	app.logger.Info(context.Background(), "Redis cluster connected",
+		logger.String("addrs", app.config.Redis.Address),
 	)
 
 	return nil
@@ -277,9 +277,11 @@ func (app *Application) initDatabase() error {
 // initVault 初始化 Vault 客户端
 func (app *Application) initVault() error {
 	vaultClient, err := crypto.NewVaultClient(
-		app.config.Vault.Address,
-		app.config.Vault.Token,
-		app.config.Vault.Namespace,
+		&crypto.VaultConfig{
+			Address: app.config.Vault.Address,
+			Token:   app.config.Vault.Token,
+		},
+		app.logger,
 	)
 	if err != nil {
 		return fmt.Errorf("create vault client: %w", err)
@@ -288,12 +290,12 @@ func (app *Application) initVault() error {
 	app.vaultClient = vaultClient
 
 	// 验证连接
-	if err := vaultClient.Ping(app.ctx); err != nil {
+	if _, err := vaultClient.Health(app.ctx); err != nil {
 		return fmt.Errorf("ping vault: %w", err)
 	}
 
-	app.logger.Info("Vault connected",
-		zap.String("address", app.config.Vault.Address),
+	app.logger.Info(context.Background(), "Vault connected",
+		logger.String("address", app.config.Vault.Address),
 	)
 
 	return nil
@@ -303,53 +305,56 @@ func (app *Application) initVault() error {
 func (app *Application) initInfrastructure() error {
 	// 缓存管理器
 	app.cacheManager = redisInfra.NewCacheManager(
-		app.redisClient,
+		app.redisClient.GetClient(),
+		"",
+		0,
 		app.logger,
 	)
 
 	// 密钥管理器
-	app.keyManager = crypto.NewKeyManager(
-		app.vaultClient,
-		app.cacheManager,
-		app.logger,
-	)
+	{
+		km, err := crypto.NewKeyManager(app.vaultClient, app.cacheManager, nil, app.logger)
+		if err != nil {
+			return fmt.Errorf("create key manager: %w", err)
+		}
+		app.keyManager = km
+	}
 
 	// JWT 管理器
-	app.jwtManager = crypto.NewJWTManager(
-		app.keyManager,
-		app.logger,
-	)
+	{
+		jm, err := crypto.NewJWTManager(app.keyManager, nil, app.logger)
+		if err != nil {
+			return fmt.Errorf("create jwt manager: %w", err)
+		}
+		app.jwtManager = jm
+	}
 
 	// 限流器
-	app.rateLimiter = ratelimit.NewRedisRateLimiter(
-		app.redisClient,
+	rl, err := ratelimit.NewRedisRateLimiter(
+		app.redisClient.GetClient(),
+		&ratelimit.RateLimiterConfig{
+			DefaultLimit:  int64(app.config.RateLimit.GlobalRPM),
+			DefaultWindow: app.config.RateLimit.WindowSize,
+		},
 		app.logger,
 	)
 
-	app.logger.Info("Infrastructure components initialized")
+	if err != nil {
+		return fmt.Errorf("create rate limiter: %w", err)
+	}
+
+	app.rateLimiter = rl
+
+	app.logger.Info(context.Background(), "Infrastructure components initialized")
 	return nil
 }
 
 // initMonitoring 初始化监控组件
 func (app *Application) initMonitoring() error {
 	// Prometheus 指标
-	app.metrics = monitoring.NewMetrics(ServiceName)
+	app.metrics = monitoring.NewMetrics()
 
-	// OpenTelemetry 追踪
-	tracer, err := monitoring.NewTracer(
-		app.ctx,
-		ServiceName,
-		ServiceVersion,
-		app.config.Monitoring.Tracing.Endpoint,
-	)
-	if err != nil {
-		return fmt.Errorf("create tracer: %w", err)
-	}
-	app.tracer = tracer
-
-	app.logger.Info("Monitoring components initialized",
-		zap.String("tracing_endpoint", app.config.Monitoring.Tracing.Endpoint),
-	)
+	app.logger.Info(context.Background(), "Monitoring components initialized")
 
 	return nil
 }
@@ -358,23 +363,23 @@ func (app *Application) initMonitoring() error {
 func (app *Application) initRepositories() error {
 	// Token 仓储
 	app.tokenRepo = postgres.NewTokenRepository(
-		app.pgPool,
+		app.dbConn.DB(),
 		app.logger,
 	)
 
 	// 设备仓储
 	app.deviceRepo = postgres.NewDeviceRepository(
-		app.pgPool,
+		app.dbConn.DB(),
 		app.logger,
 	)
 
 	// 租户仓储
 	app.tenantRepo = postgres.NewTenantRepository(
-		app.pgPool,
+		app.dbConn.DB(),
 		app.logger,
 	)
 
-	app.logger.Info("Repositories initialized")
+	app.logger.Info(context.Background(), "Repositories initialized")
 	return nil
 }
 
@@ -382,21 +387,16 @@ func (app *Application) initRepositories() error {
 func (app *Application) initApplicationServices() error {
 	// 认证应用服务
 	app.authAppService = service.NewAuthAppService(
-		app.tokenRepo,
+		domainService.NewTokenDomainService(app.tokenRepo, app.keyManager, app.logger),
 		app.deviceRepo,
 		app.tenantRepo,
-		app.jwtManager,
 		app.rateLimiter,
-		app.cacheManager,
-		app.metrics,
 		app.logger,
 	)
 
 	// 设备应用服务
 	app.deviceAppService = service.NewDeviceAppService(
 		app.deviceRepo,
-		app.tenantRepo,
-		app.cacheManager,
 		app.logger,
 	)
 
@@ -404,11 +404,10 @@ func (app *Application) initApplicationServices() error {
 	app.tenantAppService = service.NewTenantAppService(
 		app.tenantRepo,
 		app.keyManager,
-		app.cacheManager,
 		app.logger,
 	)
 
-	app.logger.Info("Application services initialized")
+	app.logger.Info(context.Background(), "Application services initialized")
 	return nil
 }
 
@@ -430,11 +429,7 @@ func (app *Application) initInterfaces() error {
 // initHTTP 初始化 HTTP 服务
 func (app *Application) initHTTP() error {
 	// 设置 Gin 模式
-	if app.config.Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	} else {
-		gin.SetMode(gin.DebugMode)
-	}
+	gin.SetMode(gin.ReleaseMode)
 
 	// 创建 Gin 引擎
 	app.ginEngine = gin.New()
@@ -442,34 +437,36 @@ func (app *Application) initHTTP() error {
 	// 创建 HTTP 处理器
 	authHandler := handlers.NewAuthHandler(
 		app.authAppService,
+		handlers.NewMetricsAdapter(app.metrics),
 		app.logger,
 	)
 
 	deviceHandler := handlers.NewDeviceHandler(
 		app.deviceAppService,
+		handlers.NewMetricsAdapter(app.metrics),
 		app.logger,
 	)
 
 	healthHandler := handlers.NewHealthHandler(
-		app.pgPool,
+		app.dbConn,
 		app.redisClient,
 		app.vaultClient,
 		app.logger,
 	)
 
 	// 配置路由
-	router.SetupRoutes(
-		app.ginEngine,
+	r := httpRouter.NewRouter(
+		app.config,
+		app.logger,
+		healthHandler,
 		authHandler,
 		deviceHandler,
-		healthHandler,
-		app.metrics,
-		app.tracer,
-		app.logger,
 	)
 
+	r.SetupRoutes(app.ginEngine)
+
 	// 创建 HTTP 服务器
-	httpPort := app.config.Server.HTTPPort
+	httpPort := fmt.Sprintf("%d", app.config.Server.HTTPPort)
 	if httpPort == "" {
 		httpPort = DefaultHTTPPort
 	}
@@ -482,8 +479,8 @@ func (app *Application) initHTTP() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	app.logger.Info("HTTP interface initialized",
-		zap.String("port", httpPort),
+	app.logger.Info(context.Background(), "HTTP interface initialized",
+		logger.String("port", httpPort),
 	)
 
 	return nil
@@ -492,25 +489,14 @@ func (app *Application) initHTTP() error {
 // initGRPC 初始化 gRPC 服务
 func (app *Application) initGRPC() error {
 	// 创建 gRPC 拦截器
-	interceptors := grpcInterface.NewInterceptors(
-		app.metrics,
-		app.tracer,
+	interceptors := grpcInterface.NewInterceptorChain(
 		app.logger,
+		app.rateLimiter,
 	)
 
 	// 创建 gRPC 服务器
 	app.grpcServer = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			interceptors.UnaryLoggingInterceptor(),
-			interceptors.UnaryMetricsInterceptor(),
-			interceptors.UnaryTracingInterceptor(),
-			interceptors.UnaryRecoveryInterceptor(),
-		),
-		grpc.ChainStreamInterceptor(
-			interceptors.StreamLoggingInterceptor(),
-			interceptors.StreamMetricsInterceptor(),
-			interceptors.StreamTracingInterceptor(),
-		),
+		interceptors.ChainUnaryInterceptors(),
 	)
 
 	// 注册 gRPC 服务
@@ -519,19 +505,17 @@ func (app *Application) initGRPC() error {
 		app.logger,
 	)
 
-	grpcInterface.RegisterAuthServiceServer(app.grpcServer, authGRPCService)
+	authGRPCService.RegisterService(app.grpcServer)
 
 	// 注册健康检查服务
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(app.grpcServer, healthServer)
 
 	// 注册反射服务（开发环境）
-	if app.config.Environment != "production" {
-		reflection.Register(app.grpcServer)
-	}
+	reflection.Register(app.grpcServer)
 
 	// 创建监听器
-	grpcPort := app.config.Server.GRPCPort
+	grpcPort := fmt.Sprintf("%d", app.config.Server.GRPCPort)
 	if grpcPort == "" {
 		grpcPort = DefaultGRPCPort
 	}
@@ -542,8 +526,8 @@ func (app *Application) initGRPC() error {
 	}
 	app.grpcListener = listener
 
-	app.logger.Info("gRPC interface initialized",
-		zap.String("port", grpcPort),
+	app.logger.Info(context.Background(), "gRPC interface initialized",
+		logger.String("port", grpcPort),
 	)
 
 	return nil
@@ -553,23 +537,23 @@ func (app *Application) initGRPC() error {
 func (app *Application) Start() error {
 	// 启动 HTTP 服务器
 	go func() {
-		app.logger.Info("Starting HTTP server",
-			zap.String("addr", app.httpServer.Addr),
+		app.logger.Info(context.Background(), "Starting HTTP server",
+			logger.String("addr", app.httpServer.Addr),
 		)
 
 		if err := app.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.logger.Fatal("HTTP server failed", zap.Error(err))
+			app.logger.Fatal(context.Background(), "HTTP server failed", err)
 		}
 	}()
 
 	// 启动 gRPC 服务器
 	go func() {
-		app.logger.Info("Starting gRPC server",
-			zap.String("addr", app.grpcListener.Addr().String()),
+		app.logger.Info(context.Background(), "Starting gRPC server",
+			logger.String("addr", app.grpcListener.Addr().String()),
 		)
 
 		if err := app.grpcServer.Serve(app.grpcListener); err != nil {
-			app.logger.Fatal("gRPC server failed", zap.Error(err))
+			app.logger.Fatal(context.Background(), "gRPC server failed", err)
 		}
 	}()
 
@@ -583,19 +567,19 @@ func (app *Application) Start() error {
 			Handler: mux,
 		}
 
-		app.logger.Info("Starting metrics server",
-			zap.String("addr", metricsServer.Addr),
+		app.logger.Info(context.Background(), "Starting metrics server",
+			logger.String("addr", metricsServer.Addr),
 		)
 
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.logger.Error("Metrics server failed", zap.Error(err))
+			app.logger.Error(context.Background(), "Metrics server failed", err)
 		}
 	}()
 
 	// 启动定时任务
 	app.startScheduledTasks()
 
-	app.logger.Info("All services started successfully")
+	app.logger.Info(context.Background(), "All services started successfully")
 	return nil
 }
 
@@ -608,23 +592,23 @@ func (app *Application) startScheduledTasks() {
 		for {
 			select {
 			case <-app.cleanupTicker.C:
-				app.logger.Info("Running scheduled cleanup task")
+				app.logger.Info(context.Background(), "Running scheduled cleanup task")
 
 				if err := app.cleanupExpiredTokens(); err != nil {
-					app.logger.Error("Cleanup task failed", zap.Error(err))
+					app.logger.Error(context.Background(), "Cleanup task failed", err)
 				} else {
-					app.logger.Info("Cleanup task completed successfully")
+					app.logger.Info(context.Background(), "Cleanup task completed successfully")
 				}
 
 			case <-app.ctx.Done():
-				app.logger.Info("Stopping scheduled tasks")
+				app.logger.Info(context.Background(), "Stopping scheduled tasks")
 				return
 			}
 		}
 	}()
 
-	app.logger.Info("Scheduled tasks started",
-		zap.Duration("cleanup_interval", CleanupInterval),
+	app.logger.Info(context.Background(), "Scheduled tasks started",
+		logger.Duration("cleanup_interval", CleanupInterval),
 	)
 }
 
@@ -634,19 +618,14 @@ func (app *Application) cleanupExpiredTokens() error {
 	defer cancel()
 
 	// 清理过期的 Token 元数据
-	deletedCount, err := app.tokenRepo.DeleteExpiredTokens(ctx, time.Now())
+	deletedCount, err := app.tokenRepo.DeleteExpired(ctx, time.Now())
 	if err != nil {
 		return fmt.Errorf("delete expired tokens: %w", err)
 	}
 
-	app.logger.Info("Expired tokens cleaned",
-		zap.Int64("deleted_count", deletedCount),
+	app.logger.Info(context.Background(), "Expired tokens cleaned",
+		logger.Int64("deleted_count", deletedCount),
 	)
-
-	// 清理过期的黑名单条目
-	if err := app.cacheManager.CleanupExpiredBlacklist(ctx); err != nil {
-		return fmt.Errorf("cleanup expired blacklist: %w", err)
-	}
 
 	return nil
 }
@@ -657,26 +636,26 @@ func (app *Application) WaitForShutdown() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-sigChan
-	app.logger.Info("Received shutdown signal",
-		zap.String("signal", sig.String()),
+	app.logger.Info(context.Background(), "Received shutdown signal",
+		logger.String("signal", sig.String()),
 	)
 }
 
 // Shutdown 优雅关闭应用
 func (app *Application) Shutdown() error {
-	app.logger.Info("Shutting down application...")
+	app.logger.Info(context.Background(), "Shutting down application...")
 
 	// 创建关闭超时上下文
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer shutdownCancel()
 
 	// 停止接受新请求
-	app.logger.Info("Stopping HTTP server...")
+	app.logger.Info(context.Background(), "Stopping HTTP server...")
 	if err := app.httpServer.Shutdown(shutdownCtx); err != nil {
-		app.logger.Error("HTTP server shutdown error", zap.Error(err))
+		app.logger.Error(context.Background(), "HTTP server shutdown error", err)
 	}
 
-	app.logger.Info("Stopping gRPC server...")
+	app.logger.Info(context.Background(), "Stopping gRPC server...")
 	app.grpcServer.GracefulStop()
 
 	// 停止定时任务
@@ -687,35 +666,26 @@ func (app *Application) Shutdown() error {
 	// 取消上下文
 	app.cancel()
 
-	// 关闭监控组件
-	if app.tracer != nil {
-		if err := app.tracer.Shutdown(shutdownCtx); err != nil {
-			app.logger.Error("Tracer shutdown error", zap.Error(err))
-		}
-	}
-
 	// 关闭数据库连接
-	if app.pgPool != nil {
-		app.logger.Info("Closing PostgreSQL connections...")
-		app.pgPool.Close()
+	if app.dbConn != nil {
+		app.logger.Info(context.Background(), "Closing PostgreSQL connections...")
+		app.dbConn.Close()
 	}
 
 	if app.redisClient != nil {
-		app.logger.Info("Closing Redis connections...")
+		app.logger.Info(context.Background(), "Closing Redis connections...")
 		if err := app.redisClient.Close(); err != nil {
-			app.logger.Error("Redis close error", zap.Error(err))
+			app.logger.Error(context.Background(), "Redis close error", err)
 		}
 	}
 
 	// 关闭 Vault 客户端
 	if app.vaultClient != nil {
 		if err := app.vaultClient.Close(); err != nil {
-			app.logger.Error("Vault client close error", zap.Error(err))
+			app.logger.Error(context.Background(), "Vault client close error", err)
 		}
 	}
 
-	app.logger.Info("Application shutdown completed")
+	app.logger.Info(context.Background(), "Application shutdown completed")
 	return nil
 }
-
-//Personal.AI order the ending

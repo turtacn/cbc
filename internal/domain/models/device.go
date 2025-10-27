@@ -257,4 +257,7 @@ func (d *Device) Clone() *Device {
 	return &clone
 }
 
+type TrustLevel string
+type DeviceStatus string
+
 //Personal.AI order the ending

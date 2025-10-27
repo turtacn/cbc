@@ -75,6 +75,9 @@ type RateLimitConfig struct {
 	// PerDevicePerMinute is the maximum requests per minute per device
 	PerDevicePerMinute int `json:"per_device_per_minute"`
 
+	// RequestsPerMinute is the maximum requests per minute allowed
+	RequestsPerMinute int `json:"requests_per_minute"`
+
 	// BurstSize is the maximum burst size allowed
 	BurstSize int `json:"burst_size"`
 

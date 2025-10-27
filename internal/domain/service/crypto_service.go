@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"crypto/rsa"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // CryptoService 加密服务接口

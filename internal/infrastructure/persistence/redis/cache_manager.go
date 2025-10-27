@@ -104,9 +104,8 @@ func (cm *CacheManager) Set(ctx context.Context, key string, value interface{}, 
 	// Serialize value to JSON
 	data, err := json.Marshal(value)
 	if err != nil {
-		cm.logger.Error("Failed to marshal cache value",
-			"key", key,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to marshal cache value", err,
+			logger.String("key", key),
 		)
 		return fmt.Errorf("failed to marshal value: %w", err)
 	}
@@ -125,17 +124,16 @@ func (cm *CacheManager) Set(ctx context.Context, key string, value interface{}, 
 
 	// Set value in Redis
 	if err := cm.client.SetArgs(ctx, fullKey, data, setArgs).Err(); err != nil {
-		cm.logger.Error("Failed to set cache value",
-			"key", fullKey,
-			"ttl", ttl,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to set cache value", err,
+			logger.String("key", fullKey),
+			logger.Duration("ttl", ttl),
 		)
 		return fmt.Errorf("failed to set cache: %w", err)
 	}
 
-	cm.logger.Debug("Cache value set successfully",
-		"key", fullKey,
-		"ttl", ttl,
+	cm.logger.Debug(ctx, "Cache value set successfully",
+		logger.String("key", fullKey),
+		logger.Duration("ttl", ttl),
 	)
 
 	return nil
@@ -158,27 +156,25 @@ func (cm *CacheManager) Get(ctx context.Context, key string, dest interface{}, o
 	// Get value from Redis
 	data, err := cm.client.Get(ctx, fullKey).Bytes()
 	if err == redis.Nil {
-		cm.logger.Debug("Cache miss", "key", fullKey)
+		cm.logger.Debug(ctx, "Cache miss", logger.String("key", fullKey))
 		return false, nil
 	}
 	if err != nil {
-		cm.logger.Error("Failed to get cache value",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to get cache value", err,
+			logger.String("key", fullKey),
 		)
 		return false, fmt.Errorf("failed to get cache: %w", err)
 	}
 
 	// Deserialize JSON
 	if err := json.Unmarshal(data, dest); err != nil {
-		cm.logger.Error("Failed to unmarshal cache value",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to unmarshal cache value", err,
+			logger.String("key", fullKey),
 		)
 		return false, fmt.Errorf("failed to unmarshal value: %w", err)
 	}
 
-	cm.logger.Debug("Cache hit", "key", fullKey)
+	cm.logger.Debug(ctx, "Cache hit", logger.String("key", fullKey))
 	return true, nil
 }
 
@@ -195,14 +191,13 @@ func (cm *CacheManager) Delete(ctx context.Context, key string, opts *CacheOptio
 	fullKey := cm.buildKey(key, opts)
 
 	if err := cm.client.Del(ctx, fullKey).Err(); err != nil {
-		cm.logger.Error("Failed to delete cache key",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to delete cache key", err,
+			logger.String("key", fullKey),
 		)
 		return fmt.Errorf("failed to delete cache: %w", err)
 	}
 
-	cm.logger.Debug("Cache key deleted", "key", fullKey)
+	cm.logger.Debug(ctx, "Cache key deleted", logger.String("key", fullKey))
 	return nil
 }
 
@@ -226,9 +221,8 @@ func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string, opts 
 		// Scan for keys matching pattern
 		keys, nextCursor, err := cm.client.Scan(ctx, cursor, fullPattern, 100).Result()
 		if err != nil {
-			cm.logger.Error("Failed to scan keys",
-				"pattern", fullPattern,
-				"error", err,
+			cm.logger.Error(ctx, "Failed to scan keys", err,
+				logger.String("pattern", fullPattern),
 			)
 			return deletedCount, fmt.Errorf("failed to scan keys: %w", err)
 		}
@@ -237,9 +231,8 @@ func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string, opts 
 		if len(keys) > 0 {
 			deleted, err := cm.client.Del(ctx, keys...).Result()
 			if err != nil {
-				cm.logger.Error("Failed to delete keys",
-					"pattern", fullPattern,
-					"error", err,
+				cm.logger.Error(ctx, "Failed to delete keys", err,
+					logger.String("pattern", fullPattern),
 				)
 				return deletedCount, fmt.Errorf("failed to delete keys: %w", err)
 			}
@@ -252,9 +245,9 @@ func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string, opts 
 		}
 	}
 
-	cm.logger.Info("Deleted keys by pattern",
-		"pattern", fullPattern,
-		"count", deletedCount,
+	cm.logger.Info(ctx, "Deleted keys by pattern",
+		logger.String("pattern", fullPattern),
+		logger.Int64("count", deletedCount),
 	)
 
 	return deletedCount, nil
@@ -275,9 +268,8 @@ func (cm *CacheManager) Exists(ctx context.Context, key string, opts *CacheOptio
 
 	count, err := cm.client.Exists(ctx, fullKey).Result()
 	if err != nil {
-		cm.logger.Error("Failed to check key existence",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to check key existence", err,
+			logger.String("key", fullKey),
 		)
 		return false, fmt.Errorf("failed to check existence: %w", err)
 	}
@@ -299,17 +291,16 @@ func (cm *CacheManager) Expire(ctx context.Context, key string, ttl time.Duratio
 	fullKey := cm.buildKey(key, opts)
 
 	if err := cm.client.Expire(ctx, fullKey, ttl).Err(); err != nil {
-		cm.logger.Error("Failed to set key expiration",
-			"key", fullKey,
-			"ttl", ttl,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to set key expiration", err,
+			logger.String("key", fullKey),
+			logger.Duration("ttl", ttl),
 		)
 		return fmt.Errorf("failed to set expiration: %w", err)
 	}
 
-	cm.logger.Debug("Key expiration set",
-		"key", fullKey,
-		"ttl", ttl,
+	cm.logger.Debug(ctx, "Key expiration set",
+		logger.String("key", fullKey),
+		logger.Duration("ttl", ttl),
 	)
 
 	return nil
@@ -330,9 +321,8 @@ func (cm *CacheManager) TTL(ctx context.Context, key string, opts *CacheOptions)
 
 	ttl, err := cm.client.TTL(ctx, fullKey).Result()
 	if err != nil {
-		cm.logger.Error("Failed to get key TTL",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to get key TTL", err,
+			logger.String("key", fullKey),
 		)
 		return 0, fmt.Errorf("failed to get TTL: %w", err)
 	}
@@ -358,9 +348,8 @@ func (cm *CacheManager) SetMultiple(ctx context.Context, items map[string]interf
 
 		data, err := json.Marshal(value)
 		if err != nil {
-			cm.logger.Error("Failed to marshal cache value",
-				"key", key,
-				"error", err,
+			cm.logger.Error(ctx, "Failed to marshal cache value", err,
+				logger.String("key", key),
 			)
 			return fmt.Errorf("failed to marshal value for key %s: %w", key, err)
 		}
@@ -369,16 +358,15 @@ func (cm *CacheManager) SetMultiple(ctx context.Context, items map[string]interf
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
-		cm.logger.Error("Failed to execute pipeline for multiple sets",
-			"count", len(items),
-			"error", err,
+		cm.logger.Error(ctx, "Failed to execute pipeline for multiple sets", err,
+			logger.Int("count", len(items)),
 		)
 		return fmt.Errorf("failed to set multiple values: %w", err)
 	}
 
-	cm.logger.Debug("Multiple cache values set",
-		"count", len(items),
-		"ttl", ttl,
+	cm.logger.Debug(ctx, "Multiple cache values set",
+		logger.Int("count", len(items)),
+		logger.Duration("ttl", ttl),
 	)
 
 	return nil
@@ -416,9 +404,8 @@ func (cm *CacheManager) GetMultiple(ctx context.Context, keys []string, opts *Ca
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		cm.logger.Error("Failed to execute pipeline for multiple gets",
-			"count", len(keys),
-			"error", err,
+		cm.logger.Error(ctx, "Failed to execute pipeline for multiple gets", err,
+			logger.Int("count", len(keys)),
 		)
 		return nil, fmt.Errorf("failed to get multiple values: %w", err)
 	}
@@ -431,9 +418,8 @@ func (cm *CacheManager) GetMultiple(ctx context.Context, keys []string, opts *Ca
 			continue // Key not found, skip
 		}
 		if err != nil {
-			cm.logger.Warn("Failed to get value for key",
-				"key", fullKeys[i],
-				"error", err,
+			cm.logger.Warn(ctx, "Failed to get value for key",
+				logger.String("key", fullKeys[i]),
 			)
 			continue
 		}
@@ -442,9 +428,9 @@ func (cm *CacheManager) GetMultiple(ctx context.Context, keys []string, opts *Ca
 		results[originalKey] = data
 	}
 
-	cm.logger.Debug("Multiple cache values retrieved",
-		"requested", len(keys),
-		"found", len(results),
+	cm.logger.Debug(ctx, "Multiple cache values retrieved",
+		logger.Int("requested", len(keys)),
+		logger.Int("found", len(results)),
 	)
 
 	return results, nil
@@ -466,18 +452,17 @@ func (cm *CacheManager) Increment(ctx context.Context, key string, delta int64, 
 
 	newValue, err := cm.client.IncrBy(ctx, fullKey, delta).Result()
 	if err != nil {
-		cm.logger.Error("Failed to increment key",
-			"key", fullKey,
-			"delta", delta,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to increment key", err,
+			logger.String("key", fullKey),
+			logger.Int64("delta", delta),
 		)
 		return 0, fmt.Errorf("failed to increment: %w", err)
 	}
 
-	cm.logger.Debug("Key incremented",
-		"key", fullKey,
-		"delta", delta,
-		"new_value", newValue,
+	cm.logger.Debug(ctx, "Key incremented",
+		logger.String("key", fullKey),
+		logger.Int64("delta", delta),
+		logger.Int64("new_value", newValue),
 	)
 
 	return newValue, nil
@@ -499,18 +484,17 @@ func (cm *CacheManager) Decrement(ctx context.Context, key string, delta int64, 
 
 	newValue, err := cm.client.DecrBy(ctx, fullKey, delta).Result()
 	if err != nil {
-		cm.logger.Error("Failed to decrement key",
-			"key", fullKey,
-			"delta", delta,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to decrement key", err,
+			logger.String("key", fullKey),
+			logger.Int64("delta", delta),
 		)
 		return 0, fmt.Errorf("failed to decrement: %w", err)
 	}
 
-	cm.logger.Debug("Key decremented",
-		"key", fullKey,
-		"delta", delta,
-		"new_value", newValue,
+	cm.logger.Debug(ctx, "Key decremented",
+		logger.String("key", fullKey),
+		logger.Int64("delta", delta),
+		logger.Int64("new_value", newValue),
 	)
 
 	return newValue, nil
@@ -533,21 +517,20 @@ func (cm *CacheManager) Lock(ctx context.Context, key string, ttl time.Duration,
 	// Try to set the lock with NX option
 	acquired, err := cm.client.SetNX(ctx, fullKey, "1", ttl).Result()
 	if err != nil {
-		cm.logger.Error("Failed to acquire lock",
-			"key", fullKey,
-			"ttl", ttl,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to acquire lock", err,
+			logger.String("key", fullKey),
+			logger.Duration("ttl", ttl),
 		)
 		return false, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
 	if acquired {
-		cm.logger.Debug("Lock acquired",
-			"key", fullKey,
-			"ttl", ttl,
+		cm.logger.Debug(ctx, "Lock acquired",
+			logger.String("key", fullKey),
+			logger.Duration("ttl", ttl),
 		)
 	} else {
-		cm.logger.Debug("Lock already held", "key", fullKey)
+		cm.logger.Debug(ctx, "Lock already held", logger.String("key", fullKey))
 	}
 
 	return acquired, nil
@@ -566,14 +549,13 @@ func (cm *CacheManager) Unlock(ctx context.Context, key string, opts *CacheOptio
 	fullKey := cm.buildKey("lock:"+key, opts)
 
 	if err := cm.client.Del(ctx, fullKey).Err(); err != nil {
-		cm.logger.Error("Failed to release lock",
-			"key", fullKey,
-			"error", err,
+		cm.logger.Error(ctx, "Failed to release lock", err,
+			logger.String("key", fullKey),
 		)
 		return fmt.Errorf("failed to release lock: %w", err)
 	}
 
-	cm.logger.Debug("Lock released", "key", fullKey)
+	cm.logger.Debug(ctx, "Lock released", logger.String("key", fullKey))
 	return nil
 }
 
@@ -586,16 +568,14 @@ func (cm *CacheManager) Unlock(ctx context.Context, key string, opts *CacheOptio
 //   - int64: Number of keys deleted
 //   - error: Flush operation error if any
 func (cm *CacheManager) FlushNamespace(ctx context.Context) (int64, error) {
-	pattern := fmt.Sprintf("%s:*", cm.namespace)
-
 	count, err := cm.DeletePattern(ctx, "*", nil)
 	if err != nil {
 		return 0, err
 	}
 
-	cm.logger.Info("Namespace flushed",
-		"namespace", cm.namespace,
-		"count", count,
+	cm.logger.Info(ctx, "Namespace flushed",
+		logger.String("namespace", cm.namespace),
+		logger.Int64("count", count),
 	)
 
 	return count, nil
@@ -631,9 +611,7 @@ func (cm *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
 	for {
 		keys, nextCursor, err := cm.client.Scan(ctx, cursor, pattern, 1000).Result()
 		if err != nil {
-			cm.logger.Error("Failed to scan keys for stats",
-				"error", err,
-			)
+			cm.logger.Error(ctx, "Failed to scan keys for stats", err)
 			break
 		}
 
@@ -646,9 +624,9 @@ func (cm *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
 
 	stats.TotalKeys = keyCount
 
-	cm.logger.Debug("Cache stats retrieved",
-		"total_keys", stats.TotalKeys,
-		"hit_rate", stats.HitRate,
+	cm.logger.Debug(ctx, "Cache stats retrieved",
+		logger.Int64("total_keys", stats.TotalKeys),
+		logger.Float64("hit_rate", stats.HitRate),
 	)
 
 	return stats, nil

@@ -6,11 +6,8 @@ import (
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/service"
-	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -21,19 +18,16 @@ import (
 type InterceptorChain struct {
 	log              logger.Logger
 	rateLimitService service.RateLimitService
-	tracer           monitoring.TracingProvider
 }
 
 // NewInterceptorChain 创建拦截器链
 func NewInterceptorChain(
 	log logger.Logger,
 	rateLimitService service.RateLimitService,
-	tracer monitoring.TracingProvider,
 ) *InterceptorChain {
 	return &InterceptorChain{
 		log:              log,
 		rateLimitService: rateLimitService,
-		tracer:           tracer,
 	}
 }
 
@@ -47,56 +41,14 @@ func (ic *InterceptorChain) UnaryRecoveryInterceptor() grpc.UnaryServerIntercept
 	) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				ic.log.Error(ctx, "gRPC handler panic recovered",
-					"method", info.FullMethod,
-					"panic", r,
+				ic.log.Error(ctx, "gRPC handler panic recovered", fmt.Errorf("%v", r),
+					logger.String("method", info.FullMethod),
 				)
 				err = status.Errorf(grpcCodes.Internal, "internal server error: %v", r)
 			}
 		}()
 
 		return handler(ctx, req)
-	}
-}
-
-// UnaryTracingInterceptor 追踪拦截器(创建 Span)
-func (ic *InterceptorChain) UnaryTracingInterceptor() grpc.UnaryServerInterceptor {
-	return func(
-		ctx context.Context,
-		req interface{},
-		info *grpc.UnaryServerInfo,
-		handler grpc.UnaryHandler,
-	) (interface{}, error) {
-		// 从 gRPC Metadata 提取 TraceID
-		md, ok := metadata.FromIncomingContext(ctx)
-		if ok {
-			if traceIDs := md.Get("x-trace-id"); len(traceIDs) > 0 {
-				ctx = context.WithValue(ctx, "trace_id", traceIDs[0])
-			}
-		}
-
-		// 创建 Span
-		ctx, span := ic.tracer.StartSpan(ctx, fmt.Sprintf("gRPC.%s", info.FullMethod))
-		defer span.End()
-
-		span.SetAttributes(
-			attribute.String("rpc.system", "grpc"),
-			attribute.String("rpc.service", info.FullMethod),
-			attribute.String("rpc.method", info.FullMethod),
-		)
-
-		// 执行处理器
-		resp, err := handler(ctx, req)
-
-		// 记录结果
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		} else {
-			span.SetStatus(codes.Ok, "success")
-		}
-
-		return resp, err
 	}
 }
 
@@ -121,9 +73,9 @@ func (ic *InterceptorChain) UnaryLoggingInterceptor() grpc.UnaryServerIntercepto
 		}
 
 		ic.log.Info(ctx, "gRPC request received",
-			"method", info.FullMethod,
-			"client_ip", clientIP,
-			"user_agent", userAgent,
+			logger.String("method", info.FullMethod),
+			logger.String("client_ip", clientIP),
+			logger.String("user_agent", userAgent),
 		)
 
 		// 执行处理器
@@ -138,10 +90,9 @@ func (ic *InterceptorChain) UnaryLoggingInterceptor() grpc.UnaryServerIntercepto
 		}
 
 		ic.log.Info(ctx, "gRPC request completed",
-			"method", info.FullMethod,
-			"duration_ms", duration.Milliseconds(),
-			"status", statusCode.String(),
-			"error", err,
+			logger.String("method", info.FullMethod),
+			logger.Int64("duration_ms", duration.Milliseconds()),
+			logger.String("status", statusCode.String()),
 		)
 
 		return resp, err
@@ -162,27 +113,31 @@ func (ic *InterceptorChain) UnaryRateLimitInterceptor() grpc.UnaryServerIntercep
 			return nil, status.Errorf(grpcCodes.InvalidArgument, "missing metadata")
 		}
 
+		var dimension service.RateLimitDimension
 		var identifier string
 		if tenantIDs := md.Get("x-tenant-id"); len(tenantIDs) > 0 {
-			identifier = fmt.Sprintf("tenant:%s", tenantIDs[0])
+			dimension = service.RateLimitDimensionTenant
+			identifier = tenantIDs[0]
 		} else if deviceIDs := md.Get("x-device-id"); len(deviceIDs) > 0 {
-			identifier = fmt.Sprintf("device:%s", deviceIDs[0])
+			dimension = service.RateLimitDimensionDevice
+			identifier = deviceIDs[0]
 		} else {
 			// 默认使用客户端 IP
 			if ips := md.Get("x-forwarded-for"); len(ips) > 0 {
-				identifier = fmt.Sprintf("ip:%s", ips[0])
+				dimension = service.RateLimitDimensionIP
+				identifier = ips[0]
 			} else {
+				dimension = service.RateLimitDimensionGlobal
 				identifier = "global"
 			}
 		}
 
 		// 检查限流
-		allowed, err := ic.rateLimitService.Allow(ctx, identifier, info.FullMethod)
+		allowed, _, _, err := ic.rateLimitService.Allow(ctx, dimension, identifier, info.FullMethod)
 		if err != nil {
-			ic.log.Error(ctx, "rate limit check failed",
-				"identifier", identifier,
-				"method", info.FullMethod,
-				"error", err,
+			ic.log.Error(ctx, "rate limit check failed", err,
+				logger.String("identifier", identifier),
+				logger.String("method", info.FullMethod),
 			)
 			// 限流服务故障时降级放行
 			return handler(ctx, req)
@@ -190,8 +145,8 @@ func (ic *InterceptorChain) UnaryRateLimitInterceptor() grpc.UnaryServerIntercep
 
 		if !allowed {
 			ic.log.Warn(ctx, "rate limit exceeded",
-				"identifier", identifier,
-				"method", info.FullMethod,
+				logger.String("identifier", identifier),
+				logger.String("method", info.FullMethod),
 			)
 			return nil, status.Errorf(
 				grpcCodes.ResourceExhausted,
@@ -216,8 +171,7 @@ func (ic *InterceptorChain) UnaryValidationInterceptor() grpc.UnaryServerInterce
 		if validator, ok := req.(interface{ Validate() error }); ok {
 			if err := validator.Validate(); err != nil {
 				ic.log.Warn(ctx, "request validation failed",
-					"method", info.FullMethod,
-					"error", err,
+					logger.String("method", info.FullMethod),
 				)
 				return nil, status.Errorf(grpcCodes.InvalidArgument, "validation failed: %v", err)
 			}
@@ -247,21 +201,26 @@ func (ic *InterceptorChain) UnaryErrorInterceptor() grpc.UnaryServerInterceptor 
 
 // convertDomainErrorToGRPC 将领域错误转换为 gRPC 错误
 func convertDomainErrorToGRPC(err error) error {
-	switch {
-	case errors.IsNotFound(err):
-		return status.Errorf(grpcCodes.NotFound, err.Error())
-	case errors.IsInvalidInput(err):
-		return status.Errorf(grpcCodes.InvalidArgument, err.Error())
-	case errors.IsUnauthorized(err):
-		return status.Errorf(grpcCodes.Unauthenticated, err.Error())
-	case errors.IsForbidden(err):
-		return status.Errorf(grpcCodes.PermissionDenied, err.Error())
-	case errors.IsConflict(err):
-		return status.Errorf(grpcCodes.AlreadyExists, err.Error())
-	case errors.IsRateLimitExceeded(err):
-		return status.Errorf(grpcCodes.ResourceExhausted, err.Error())
-	case errors.IsServiceUnavailable(err):
-		return status.Errorf(grpcCodes.Unavailable, err.Error())
+	cbcErr, ok := errors.AsCBCError(err)
+	if !ok {
+		return status.Errorf(grpcCodes.Internal, "internal server error: %v", err)
+	}
+
+	switch cbcErr.HTTPStatus() {
+	case 404:
+		return status.Errorf(grpcCodes.NotFound, "%s", cbcErr.Error())
+	case 400:
+		return status.Errorf(grpcCodes.InvalidArgument, "%s", cbcErr.Error())
+	case 401:
+		return status.Errorf(grpcCodes.Unauthenticated, "%s", cbcErr.Error())
+	case 403:
+		return status.Errorf(grpcCodes.PermissionDenied, "%s", cbcErr.Error())
+	case 409:
+		return status.Errorf(grpcCodes.AlreadyExists, "%s", cbcErr.Error())
+	case 429:
+		return status.Errorf(grpcCodes.ResourceExhausted, "%s", cbcErr.Error())
+	case 503:
+		return status.Errorf(grpcCodes.Unavailable, "%s", cbcErr.Error())
 	default:
 		return status.Errorf(grpcCodes.Internal, "internal server error: %v", err)
 	}
@@ -271,12 +230,9 @@ func convertDomainErrorToGRPC(err error) error {
 func (ic *InterceptorChain) ChainUnaryInterceptors() grpc.ServerOption {
 	return grpc.ChainUnaryInterceptor(
 		ic.UnaryRecoveryInterceptor(),    // 1. 恢复 panic
-		ic.UnaryTracingInterceptor(),     // 2. 追踪
-		ic.UnaryLoggingInterceptor(),     // 3. 日志
-		ic.UnaryRateLimitInterceptor(),   // 4. 限流
-		ic.UnaryValidationInterceptor(),  // 5. 参数验证
-		ic.UnaryErrorInterceptor(),       // 6. 错误转换
+		ic.UnaryLoggingInterceptor(),     // 2. 日志
+		ic.UnaryRateLimitInterceptor(),   // 3. 限流
+		ic.UnaryValidationInterceptor(),  // 4. 参数验证
+		ic.UnaryErrorInterceptor(),       // 5. 错误转换
 	)
 }
-
-//Personal.AI order the ending

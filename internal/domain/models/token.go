@@ -49,6 +49,9 @@ type Token struct {
 
 	// UpdatedAt is the database record last update timestamp
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+
+	// Metadata is a map of additional custom data
+	Metadata map[string]interface{} `json:"metadata,omitempty" db:"metadata"`
 }
 
 // NewToken creates a new Token instance with the provided parameters.
@@ -221,6 +224,23 @@ func findInMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TokenIntrospection represents the response from a token introspection endpoint.
+type TokenIntrospection struct {
+	Active    bool                   `json:"active"`
+	Scope     string                 `json:"scope,omitempty"`
+	ClientID  string                 `json:"client_id,omitempty"`
+	Username  string                 `json:"username,omitempty"`
+	TokenType string                 `json:"token_type,omitempty"`
+	Exp       int64                  `json:"exp,omitempty"`
+	Iat       int64                  `json:"iat,omitempty"`
+	Nbf       int64                  `json:"nbf,omitempty"`
+	Sub       string                 `json:"sub,omitempty"`
+	Aud       []string               `json:"aud,omitempty"`
+	Iss       string                 `json:"iss,omitempty"`
+	Jti       string                 `json:"jti,omitempty"`
+	Extra     map[string]interface{} `json:"extra,omitempty"`
 }
 
 //Personal.AI order the ending

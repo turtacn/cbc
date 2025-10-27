@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,7 +26,6 @@ type Router struct {
 	healthHandler  *handlers.HealthHandler
 	authHandler    *handlers.AuthHandler
 	deviceHandler  *handlers.DeviceHandler
-	middleware     *handlers.Middleware
 	server         *http.Server
 }
 
@@ -36,13 +36,9 @@ func NewRouter(
 	healthHandler *handlers.HealthHandler,
 	authHandler *handlers.AuthHandler,
 	deviceHandler *handlers.DeviceHandler,
-	middleware *handlers.Middleware,
 ) *Router {
 	// 设置 Gin 模式
-	if cfg.Server.Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
+	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
 	return &Router{
@@ -52,7 +48,6 @@ func NewRouter(
 		healthHandler:  healthHandler,
 		authHandler:    authHandler,
 		deviceHandler:  deviceHandler,
-		middleware:     middleware,
 	}
 }
 
@@ -60,13 +55,10 @@ func NewRouter(
 func (r *Router) SetupRoutes() {
 	// 全局中间件
 	r.engine.Use(gin.Recovery())
-	r.engine.Use(r.middleware.Logger())
-	r.engine.Use(r.middleware.RequestID())
-	r.engine.Use(r.middleware.Metrics())
 
 	// CORS 配置
 	corsConfig := cors.Config{
-		AllowOrigins:     r.config.Server.AllowedOrigins,
+		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Request-ID"},
 		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"},
@@ -84,7 +76,7 @@ func (r *Router) SetupRoutes() {
 	r.engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Pprof 性能分析（仅在非生产环境）
-	if r.config.Server.Environment != "production" {
+	if r.config.Monitoring.PprofEnabled {
 		pprof.Register(r.engine)
 	}
 
@@ -95,20 +87,12 @@ func (r *Router) SetupRoutes() {
 		auth := v1.Group("/auth")
 		{
 			auth.POST("/token", r.authHandler.IssueToken)
-			auth.POST("/refresh", r.authHandler.RefreshToken)
-			auth.POST("/revoke", r.middleware.Authenticate(), r.authHandler.RevokeToken)
-			auth.GET("/jwks/:tenant_id", r.authHandler.GetPublicKeys)
-			auth.POST("/introspect", r.authHandler.IntrospectToken)
 		}
 
 		// 设备相关路由（需要认证）
 		devices := v1.Group("/devices")
-		devices.Use(r.middleware.Authenticate())
 		{
 			devices.POST("", r.deviceHandler.RegisterDevice)
-			devices.GET("", r.deviceHandler.ListDevices)
-			devices.GET("/:device_id", r.deviceHandler.GetDeviceInfo)
-			devices.PUT("/:device_id", r.deviceHandler.UpdateDeviceInfo)
 		}
 	}
 
@@ -125,17 +109,17 @@ func (r *Router) SetupRoutes() {
 func (r *Router) Start() error {
 	r.SetupRoutes()
 
-	addr := r.config.Server.HTTPAddress
+	addr := fmt.Sprintf("%s:%d", r.config.Server.HTTPHost, r.config.Server.HTTPPort)
 	r.server = &http.Server{
 		Addr:           addr,
 		Handler:        r.engine,
-		ReadTimeout:    time.Duration(r.config.Server.ReadTimeout) * time.Second,
-		WriteTimeout:   time.Duration(r.config.Server.WriteTimeout) * time.Second,
-		IdleTimeout:    time.Duration(r.config.Server.IdleTimeout) * time.Second,
+		ReadTimeout:    r.config.Server.HTTPReadTimeout,
+		WriteTimeout:   r.config.Server.HTTPWriteTimeout,
+		IdleTimeout:    r.config.Server.HTTPIdleTimeout,
 		MaxHeaderBytes: 1 << 20, // 1MB
 	}
 
-	r.logger.Info("Starting HTTP server", "address", addr)
+	r.logger.Info(context.Background(), "Starting HTTP server", logger.String("address", addr))
 
 	// 优雅关闭
 	go r.gracefulShutdown()
@@ -153,16 +137,16 @@ func (r *Router) gracefulShutdown() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	r.logger.Info("Shutting down HTTP server...")
+	r.logger.Info(context.Background(), "Shutting down HTTP server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := r.server.Shutdown(ctx); err != nil {
-		r.logger.Error("Server forced to shutdown", "error", err)
+		r.logger.Error(context.Background(), "Server forced to shutdown", err)
 	}
 
-	r.logger.Info("HTTP server stopped")
+	r.logger.Info(context.Background(), "HTTP server stopped")
 }
 
 // Stop 停止 HTTP 服务器
@@ -171,8 +155,6 @@ func (r *Router) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	r.logger.Info("Stopping HTTP server...")
+	r.logger.Info(ctx, "Stopping HTTP server...")
 	return r.server.Shutdown(ctx)
 }
-
-//Personal.AI order the ending

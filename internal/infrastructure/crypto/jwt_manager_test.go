@@ -5,219 +5,219 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
-func TestJWTManager_IssueToken(t *testing.T) {
-	// 生成测试用的 RSA 密钥对
+// MockKeyManagementService is a mock implementation of the KeyManagementService interface.
+type MockKeyManagementService struct {
+	mock.Mock
+}
+
+func (m *MockKeyManagementService) GetActiveKeyForTenant(ctx context.Context, tenantID string) (*KeyPair, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*KeyPair), args.Error(1)
+}
+
+func (m *MockKeyManagementService) GetKeyPair(ctx context.Context, keyID string) (*KeyPair, error) {
+	args := m.Called(ctx, keyID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*KeyPair), args.Error(1)
+}
+
+func (m *MockKeyManagementService) ListTenantKeys(ctx context.Context, tenantID string) ([]*KeyMetadata, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*KeyMetadata), args.Error(1)
+}
+
+// generateTestKeyPair creates a real RSA key pair and returns it in the KeyPair struct format with PEM strings.
+func generateTestKeyPair(t *testing.T, tenantID string) *KeyPair {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
-	config := &JWTConfig{
-		Issuer:        "cbc-auth-service",
-		Audience:      []string{"cbc-agents"},
-		PrivateKey:    privateKey,
-		PublicKey:     &privateKey.PublicKey,
-		SigningMethod: jwt.SigningMethodRS256,
-	}
+	privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privBytes,
+	})
 
-	manager := NewJWTManager(config)
-	ctx := context.Background()
+	pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	pubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubBytes,
+	})
 
-	tenantID := uuid.New()
-	deviceID := uuid.New()
-	jti := uuid.New().String()
-	now := time.Now()
-
-	tests := []struct {
-		name    string
-		token   *models.Token
-		wantErr bool
-	}{
-		{
-			name: "Successfully issue access token",
-			token: &models.Token{
-				ID:        uuid.New(),
-				JTI:       jti,
-				TenantID:  tenantID,
-				DeviceID:  deviceID,
-				TokenType: models.TokenTypeAccess,
-				Scope:     "agent:read agent:write",
-				IssuedAt:  now,
-				ExpiresAt: now.Add(15 * time.Minute),
-			},
-			wantErr: false,
-		},
-		{
-			name: "Successfully issue refresh token",
-			token: &models.Token{
-				ID:        uuid.New(),
-				JTI:       jti,
-				TenantID:  tenantID,
-				DeviceID:  deviceID,
-				TokenType: models.TokenTypeRefresh,
-				Scope:     "agent:read agent:write",
-				IssuedAt:  now,
-				ExpiresAt: now.Add(30 * 24 * time.Hour),
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tokenString, err := manager.IssueToken(ctx, tt.token)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Empty(t, tokenString)
-			} else {
-				assert.NoError(t, err)
-				assert.NotEmpty(t, tokenString)
-
-				// 验证生成的 token
-				parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-					return &privateKey.PublicKey, nil
-				})
-				require.NoError(t, err)
-				assert.True(t, parsedToken.Valid)
-
-				claims, ok := parsedToken.Claims.(jwt.MapClaims)
-				require.True(t, ok)
-
-				assert.Equal(t, jti, claims["jti"])
-				assert.Equal(t, tenantID.String(), claims["tenant_id"])
-				assert.Equal(t, deviceID.String(), claims["device_id"])
-				assert.Equal(t, string(tt.token.TokenType), claims["token_type"])
-				assert.Equal(t, tt.token.Scope, claims["scope"])
-			}
-		})
+	return &KeyPair{
+		ID:         "test-key-" + uuid.New().String(),
+		PrivateKey: string(privPEM),
+		PublicKey:  string(pubPEM),
+		Algorithm:  RSA2048,
+		TenantID:   tenantID,
+		CreatedAt:  time.Now(),
+		ExpiresAt:  time.Now().Add(1 * time.Hour),
+		Status:     KeyStatusActive,
 	}
 }
 
-func TestJWTManager_ValidateToken(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
+func TestJWTManager_GenerateJWT(t *testing.T) {
+	log := logger.NewDefaultLogger()
 	config := &JWTConfig{
-		Issuer:        "cbc-auth-service",
-		Audience:      []string{"cbc-agents"},
-		PrivateKey:    privateKey,
-		PublicKey:     &privateKey.PublicKey,
-		SigningMethod: jwt.SigningMethodRS256,
+		Issuer:     "cbc-auth-service",
+		Algorithm:  "RS256",
+		DefaultTTL: 15 * time.Minute,
+		Audience:   []string{"cbc-api"},
 	}
 
-	manager := NewJWTManager(config)
-	ctx := context.Background()
+	mockKeyManager := new(MockKeyManagementService)
 
-	tenantID := uuid.New()
-	deviceID := uuid.New()
-	jti := uuid.New().String()
-	now := time.Now()
-
-	// 创建有效的 token
-	validToken := &models.Token{
-		ID:        uuid.New(),
-		JTI:       jti,
-		TenantID:  tenantID,
-		DeviceID:  deviceID,
-		TokenType: models.TokenTypeAccess,
-		Scope:     "agent:read agent:write",
-		IssuedAt:  now,
-		ExpiresAt: now.Add(15 * time.Minute),
-	}
-	validTokenString, err := manager.IssueToken(ctx, validToken)
+	manager, err := NewJWTManager(mockKeyManager, config, log)
 	require.NoError(t, err)
 
-	// 创建过期的 token
-	expiredToken := &models.Token{
-		ID:        uuid.New(),
+	ctx := context.Background()
+	tenantID := uuid.New().String()
+	keyPair := generateTestKeyPair(t, tenantID)
+
+	tokenModel := &models.Token{
 		JTI:       uuid.New().String(),
 		TenantID:  tenantID,
-		DeviceID:  deviceID,
-		TokenType: models.TokenTypeAccess,
+		DeviceID:  uuid.New().String(),
+		TokenType: constants.TokenTypeAccess,
 		Scope:     "agent:read",
-		IssuedAt:  now.Add(-2 * time.Hour),
-		ExpiresAt: now.Add(-1 * time.Hour),
-	}
-	expiredTokenString, err := manager.IssueToken(ctx, expiredToken)
-	require.NoError(t, err)
-
-	tests := []struct {
-		name        string
-		tokenString string
-		wantErr     bool
-		errType     error
-	}{
-		{
-			name:        "Valid token",
-			tokenString: validTokenString,
-			wantErr:     false,
-		},
-		{
-			name:        "Expired token",
-			tokenString: expiredTokenString,
-			wantErr:     true,
-			errType:     errors.ErrTokenExpired,
-		},
-		{
-			name:        "Invalid token format",
-			tokenString: "invalid.token.string",
-			wantErr:     true,
-			errType:     errors.ErrInvalidToken,
-		},
-		{
-			name:        "Empty token",
-			tokenString: "",
-			wantErr:     true,
-			errType:     errors.ErrInvalidToken,
-		},
+		IssuedAt:  time.Now(),
+		ExpiresAt: time.Now().Add(15 * time.Minute),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			token, err := manager.ValidateToken(ctx, tt.tokenString)
+	t.Run("Successfully generate token", func(t *testing.T) {
+		mockKeyManager.On("GetActiveKeyForTenant", ctx, tenantID).Return(keyPair, nil).Once()
 
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, token)
-				if tt.errType != nil {
-					assert.ErrorIs(t, err, tt.errType)
-				}
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, token)
-				assert.Equal(t, jti, token.JTI)
-				assert.Equal(t, tenantID, token.TenantID)
-				assert.Equal(t, deviceID, token.DeviceID)
-			}
+		tokenString, err := manager.GenerateJWT(ctx, tokenModel)
+
+		assert.NoError(t, err)
+		assert.NotEmpty(t, tokenString)
+
+		// Verify the token can be parsed with the public key
+		parsedKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(keyPair.PublicKey))
+		require.NoError(t, err)
+		parsedToken, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return parsedKey, nil
 		})
-	}
+		require.NoError(t, err)
+		claims, ok := parsedToken.Claims.(*CustomClaims)
+		require.True(t, ok)
+
+		assert.Equal(t, tokenModel.JTI, claims.ID)
+		assert.Equal(t, tokenModel.TenantID, claims.TenantID)
+		assert.Contains(t, claims.Audience, "cbc-api")
+
+		mockKeyManager.AssertExpectations(t)
+	})
+
+	t.Run("KeyManager returns an error", func(t *testing.T) {
+		expectedErr := errors.New(errors.CodeInternal, "failed to get signing key")
+		mockKeyManager.On("GetActiveKeyForTenant", ctx, tenantID).Return(nil, expectedErr).Once()
+
+		tokenString, err := manager.GenerateJWT(ctx, tokenModel)
+
+		assert.Error(t, err)
+		assert.Empty(t, tokenString)
+		assert.Contains(t, err.Error(), expectedErr.Error())
+
+		mockKeyManager.AssertExpectations(t)
+	})
 }
 
-func TestJWTManager_RefreshPublicKeys(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+func TestJWTManager_VerifyJWT(t *testing.T) {
+	log := logger.NewDefaultLogger()
+	config := &JWTConfig{
+		Issuer:     "cbc-auth-service",
+		Algorithm:  "RS256",
+		DefaultTTL: 15 * time.Minute,
+		Audience:   []string{"cbc-api"},
+	}
+	mockKeyManager := new(MockKeyManagementService)
+	manager, err := NewJWTManager(mockKeyManager, config, log)
 	require.NoError(t, err)
 
-	config := &JWTConfig{
-		Issuer:        "cbc-auth-service",
-		Audience:      []string{"cbc-agents"},
-		PrivateKey:    privateKey,
-		PublicKey:     &privateKey.PublicKey,
-		SigningMethod: jwt.SigningMethodRS256,
+	ctx := context.Background()
+	tenantID := uuid.New().String()
+
+	// Create a valid token for testing
+	validKeyPair := generateTestKeyPair(t, tenantID)
+	validTokenModel := &models.Token{
+		JTI:       uuid.New().String(),
+		TenantID:  tenantID,
+		DeviceID:  uuid.New().String(),
+		TokenType: constants.TokenTypeAccess,
+		IssuedAt:  time.Now(),
 	}
 
-	manager := NewJWTManager(config)
-	ctx := context.Background()
+	// We need a temporary manager with a real key to sign the token
+	tempMock := new(MockKeyManagementService)
+	tempManager, _ := NewJWTManager(tempMock, config, log)
+	tempMock.On("GetActiveKeyForTenant", ctx, tenantID).Return(validKeyPair, nil)
+	validTokenString, err := tempManager.GenerateJWT(ctx, validTokenModel)
+	require.NoError(t, err)
 
-	err = manager.RefreshPublicKeys(ctx)
-	assert.NoError(t, err)
+	// Create an expired token for testing
+	expiredConfig := &JWTConfig{
+		Issuer:     "cbc-auth-service",
+		Algorithm:  "RS256",
+		DefaultTTL: -1 * time.Minute,
+		Audience:   []string{"cbc-api"},
+	}
+	expiredTempManager, _ := NewJWTManager(tempMock, expiredConfig, log)
+	expiredTokenModel := &models.Token{
+		JTI:       uuid.New().String(),
+		TenantID:  tenantID,
+		DeviceID:  uuid.New().String(),
+		TokenType: constants.TokenTypeAccess,
+		IssuedAt:  time.Now().Add(-2 * time.Minute),
+	}
+	expiredTokenString, err := expiredTempManager.GenerateJWT(ctx, expiredTokenModel)
+	require.NoError(t, err)
+
+	t.Run("Successfully verify a valid token", func(t *testing.T) {
+		mockKeyManager.On("GetKeyPair", ctx, validKeyPair.ID).Return(validKeyPair, nil).Once()
+
+		claims, err := manager.VerifyJWT(ctx, validTokenString)
+		assert.NoError(t, err)
+		require.NotNil(t, claims)
+		assert.Equal(t, validTokenModel.JTI, claims.ID)
+		assert.Equal(t, validTokenModel.TenantID, claims.TenantID)
+
+		mockKeyManager.AssertExpectations(t)
+	})
+
+	t.Run("Fail verification on expired token", func(t *testing.T) {
+		mockKeyManager.On("GetKeyPair", ctx, validKeyPair.ID).Return(validKeyPair, nil).Once()
+
+		claims, err := manager.VerifyJWT(ctx, expiredTokenString)
+		assert.Error(t, err)
+		assert.Nil(t, claims)
+
+		cbcErr, ok := errors.AsCBCError(err)
+		require.True(t, ok)
+		assert.Equal(t, constants.ErrorCode(errors.CodeUnauthenticated), cbcErr.Code())
+	})
 }

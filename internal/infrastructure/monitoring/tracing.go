@@ -29,7 +29,7 @@ type TracingManager struct {
 // NewTracingManager 创建追踪管理器
 func NewTracingManager(cfg *config.Config, log logger.Logger) (*TracingManager, error) {
 	if !cfg.Tracing.Enabled {
-		log.Info("Tracing is disabled")
+		log.Info(context.Background(), "Tracing is disabled")
 		return &TracingManager{
 			tracer: otel.Tracer("cbc-auth-service"),
 			logger: log,
@@ -48,9 +48,8 @@ func NewTracingManager(cfg *config.Config, log logger.Logger) (*TracingManager, 
 	res, err := resource.New(
 		context.Background(),
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String(cfg.Service.Name),
-			semconv.ServiceVersionKey.String(cfg.Service.Version),
-			attribute.String("environment", cfg.Service.Environment),
+			semconv.ServiceNameKey.String(cfg.Tracing.ServiceName),
+			attribute.String("environment", cfg.Tracing.Environment),
 		),
 	)
 	if err != nil {
@@ -61,7 +60,7 @@ func NewTracingManager(cfg *config.Config, log logger.Logger) (*TracingManager, 
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(cfg.Tracing.SampleRate)),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(cfg.Tracing.SamplingRate)),
 	)
 
 	// 设置全局 TracerProvider
@@ -73,9 +72,9 @@ func NewTracingManager(cfg *config.Config, log logger.Logger) (*TracingManager, 
 		propagation.Baggage{},
 	))
 
-	log.Info("Tracing initialized successfully",
-		logger.Field{Key: "endpoint", Value: cfg.Tracing.JaegerEndpoint},
-		logger.Field{Key: "sample_rate", Value: cfg.Tracing.SampleRate},
+	log.Info(context.Background(), "Tracing initialized successfully",
+		logger.String("endpoint", cfg.Tracing.JaegerEndpoint),
+		logger.Float64("sample_rate", cfg.Tracing.SamplingRate),
 	)
 
 	return &TracingManager{
@@ -188,11 +187,11 @@ func (tm *TracingManager) Shutdown(ctx context.Context) error {
 	}
 
 	if err := tm.provider.Shutdown(ctx); err != nil {
-		tm.logger.Error("Failed to shutdown tracing provider", logger.Field{Key: "error", Value: err})
+		tm.logger.Error(ctx, "Failed to shutdown tracing provider", err)
 		return err
 	}
 
-	tm.logger.Info("Tracing provider shutdown successfully")
+	tm.logger.Info(ctx, "Tracing provider shutdown successfully")
 	return nil
 }
 

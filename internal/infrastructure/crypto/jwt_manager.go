@@ -24,7 +24,7 @@ import (
 
 // JWTManager implements JWT token generation and verification.
 type JWTManager struct {
-	keyManager *KeyManager
+	keyManager KeyManagementService
 	logger     logger.Logger
 	config     *JWTConfig
 }
@@ -63,6 +63,7 @@ type CustomClaims struct {
 	TenantID  string                 `json:"tenant_id,omitempty"`
 	DeviceID  string                 `json:"device_id,omitempty"`
 	TokenType string                 `json:"token_type,omitempty"`
+	Scope     string                 `json:"scope,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -95,7 +96,7 @@ type JWKS struct {
 //   - *JWTManager: Initialized JWT manager
 //   - error: Initialization error if any
 func NewJWTManager(
-	keyManager *KeyManager,
+	keyManager KeyManagementService,
 	config *JWTConfig,
 	log logger.Logger,
 ) (*JWTManager, error) {
@@ -113,10 +114,10 @@ func NewJWTManager(
 		config:     config,
 	}
 
-	log.Info("JWT manager initialized",
-		"issuer", config.Issuer,
-		"algorithm", config.Algorithm,
-		"default_ttl", config.DefaultTTL,
+	log.Info(context.Background(), "JWT manager initialized",
+		logger.String("issuer", config.Issuer),
+		logger.String("algorithm", config.Algorithm),
+		logger.Duration("default_ttl", config.DefaultTTL),
 	)
 
 	return jm, nil
@@ -154,9 +155,9 @@ func (jm *JWTManager) GenerateJWT(ctx context.Context, token *models.Token) (str
 	now := time.Now()
 	claims := CustomClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        token.ID,
+			ID:        token.JTI,
 			Issuer:    jm.config.Issuer,
-			Subject:   token.UserID,
+			Subject:   token.DeviceID,
 			Audience:  jwt.ClaimStrings(jm.config.Audience),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			NotBefore: jwt.NewNumericDate(now),
@@ -164,8 +165,8 @@ func (jm *JWTManager) GenerateJWT(ctx context.Context, token *models.Token) (str
 		},
 		TenantID:  token.TenantID,
 		DeviceID:  token.DeviceID,
-		TokenType: tokenType,
-		Metadata:  token.Metadata,
+		TokenType: string(tokenType),
+		Metadata:  nil,
 	}
 
 	// Parse private key
@@ -195,12 +196,12 @@ func (jm *JWTManager) GenerateJWT(ctx context.Context, token *models.Token) (str
 		return "", errors.Wrap(err, errors.CodeInternal, "failed to sign JWT")
 	}
 
-	jm.logger.Debug("JWT generated",
-		"token_id", token.ID,
-		"tenant_id", token.TenantID,
-		"key_id", keyPair.ID,
-		"token_type", tokenType,
-		"expires_at", claims.ExpiresAt.Time,
+	jm.logger.Debug(ctx, "JWT generated",
+		logger.String("token_id", token.JTI),
+		logger.String("tenant_id", token.TenantID),
+		logger.String("key_id", keyPair.ID),
+		logger.String("token_type", string(tokenType)),
+		logger.Time("expires_at", claims.ExpiresAt.Time),
 	)
 
 	return signedToken, nil
@@ -220,7 +221,7 @@ func (jm *JWTManager) VerifyJWT(ctx context.Context, tokenString string) (*Custo
 	parser := jwt.NewParser()
 	token, _, err := parser.ParseUnverified(tokenString, &CustomClaims{})
 	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeUnauthenticated, "failed to parse JWT")
+		return nil, errors.New(errors.CodeUnauthenticated, "failed to parse JWT")
 	}
 
 	// Get key ID from header
@@ -236,7 +237,7 @@ func (jm *JWTManager) VerifyJWT(ctx context.Context, tokenString string) (*Custo
 	// Get public key
 	keyPair, err := jm.keyManager.GetKeyPair(ctx, kid)
 	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeUnauthenticated, "failed to get verification key")
+		return nil, errors.New(errors.CodeUnauthenticated, "failed to get verification key")
 	}
 
 	// Check if key is valid (active or deprecated within grace period)
@@ -258,18 +259,18 @@ func (jm *JWTManager) VerifyJWT(ctx context.Context, tokenString string) (*Custo
 		switch keyPair.Algorithm {
 		case RSA2048, RSA4096:
 			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-				return nil, errors.New(errors.CodeUnauthenticated, "unexpected signing method: %v", token.Header["alg"])
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 		case ECDSAP256, ECDSAP384:
 			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-				return nil, errors.New(errors.CodeUnauthenticated, "unexpected signing method: %v", token.Header["alg"])
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 		}
 		return publicKey, nil
 	}, jwt.WithLeeway(jm.config.ClockSkew))
 
 	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeUnauthenticated, "failed to verify JWT")
+		return nil, errors.New(errors.CodeUnauthenticated, "failed to verify JWT")
 	}
 
 	if !parsedToken.Valid {
@@ -278,14 +279,14 @@ func (jm *JWTManager) VerifyJWT(ctx context.Context, tokenString string) (*Custo
 
 	// Validate claims
 	if err := jm.validateClaims(claims); err != nil {
-		return nil, errors.Wrap(err, errors.CodeUnauthenticated, "invalid JWT claims")
+		return nil, errors.New(errors.CodeUnauthenticated, "invalid JWT claims")
 	}
 
-	jm.logger.Debug("JWT verified",
-		"token_id", claims.ID,
-		"tenant_id", claims.TenantID,
-		"key_id", kid,
-		"subject", claims.Subject,
+	jm.logger.Debug(ctx, "JWT verified",
+		logger.String("token_id", claims.ID),
+		logger.String("tenant_id", claims.TenantID),
+		logger.String("key_id", kid),
+		logger.String("subject", claims.Subject),
 	)
 
 	return claims, nil
@@ -350,18 +351,18 @@ func (jm *JWTManager) GetPublicKeySet(ctx context.Context, tenantID string) (str
 
 		keyPair, err := jm.keyManager.GetKeyPair(ctx, meta.ID)
 		if err != nil {
-			jm.logger.Warn("Failed to load key for JWKS",
-				"key_id", meta.ID,
-				"error", err,
+			jm.logger.Warn(ctx, "Failed to load key for JWKS",
+				logger.String("key_id", meta.ID),
+				logger.Error(err),
 			)
 			continue
 		}
 
 		jwk, err := jm.publicKeyToJWK(keyPair)
 		if err != nil {
-			jm.logger.Warn("Failed to convert key to JWK",
-				"key_id", meta.ID,
-				"error", err,
+			jm.logger.Warn(ctx, "Failed to convert key to JWK",
+				logger.String("key_id", meta.ID),
+				logger.Error(err),
 			)
 			continue
 		}
@@ -395,18 +396,16 @@ func (jm *JWTManager) RefreshToken(ctx context.Context, refreshToken string) (*m
 	}
 
 	// Check token type
-	if claims.TokenType != constants.TokenTypeRefresh {
+	if claims.TokenType != string(constants.TokenTypeRefresh) {
 		return nil, errors.New(errors.CodeInvalidArgument, "not a refresh token")
 	}
 
 	// Create new token
 	token := &models.Token{
-		ID:        generateTokenID(),
-		UserID:    claims.Subject,
+		JTI:       generateTokenID(),
 		TenantID:  claims.TenantID,
 		DeviceID:  claims.DeviceID,
 		TokenType: constants.TokenTypeAccess,
-		Metadata:  claims.Metadata,
 		CreatedAt: time.Now(),
 	}
 
@@ -579,7 +578,7 @@ func randomString(length int) string {
 
 // Close closes the JWT manager.
 func (jm *JWTManager) Close() error {
-	jm.logger.Info("JWT manager closed")
+	jm.logger.Info(context.Background(), "JWT manager closed")
 	return nil
 }
 

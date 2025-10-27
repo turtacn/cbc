@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/constants"
 )
 
 // TokenRepository 定义令牌仓储接口
@@ -158,12 +159,12 @@ type TokenRepository interface {
 // TokenMetadataQuery 令牌元数据查询参数
 // 用于复杂查询场景（如管理端的令牌列表筛选）
 type TokenMetadataQuery struct {
-	TenantID      string           // 租户 ID（可选）
-	AgentID       string           // Agent ID（可选）
-	TokenType     models.TokenType // 令牌类型（可选）
-	Status        string           // 状态：active, revoked, expired（可选）
-	IssuedAfter   *time.Time       // 颁发时间下界（可选）
-	IssuedBefore  *time.Time       // 颁发时间上界（可选）
+	TenantID      string              // 租户 ID（可选）
+	AgentID       string              // Agent ID（可选）
+	TokenType     constants.TokenType // 令牌类型（可选）
+	Status        string              // 状态：active, revoked, expired（可选）
+	IssuedAfter   *time.Time          // 颁发时间下界（可选）
+	IssuedBefore  *time.Time          // 颁发时间上界（可选）
 	ExpiresAfter  *time.Time       // 过期时间下界（可选）
 	ExpiresBefore *time.Time       // 过期时间上界（可选）
 	Limit         int              // 每页数量（默认 100，最大 1000）

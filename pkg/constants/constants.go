@@ -140,6 +140,9 @@ const (
 
 	// RateLimitBurstSize is the burst size for token bucket algorithm
 	RateLimitBurstSize = 100
+
+	// DefaultRateLimitPerMinute is the default rate limit per minute
+	DefaultRateLimitPerMinute = 60
 )
 
 // RateLimitScope defines the scope level for rate limiting
@@ -175,6 +178,10 @@ const (
 
 	// GrantTypeDeviceCode is reserved for future device flow support
 	GrantTypeDeviceCode GrantType = "urn:ietf:params:oauth:grant-type:device_code"
+	// GrantTypeAuthorizationCode is used for authorization code flow
+	GrantTypeAuthorizationCode GrantType = "authorization_code"
+	// GrantTypePassword is used for resource owner password credentials flow
+	GrantTypePassword GrantType = "password"
 )
 
 // ClientAssertionType represents the type of client assertion
@@ -282,20 +289,56 @@ const (
 
 	// EventTypeEmergencyRevocation represents emergency key revocation events
 	EventTypeEmergencyRevocation AuditEventType = "emergency_revocation"
+	// AuditEventTokenRefresh represents a token refresh event
+	AuditEventTokenRefresh AuditEventType = "token_refresh"
+	// AuditEventDeviceRegister represents a device registration event
+	AuditEventDeviceRegister AuditEventType = "device_register"
+	// AuditEventDeviceRevoke represents a device revocation event
+	AuditEventDeviceRevoke AuditEventType = "device_revoke"
+	// AuditEventTokenIssued represents a token issuance event
+	AuditEventTokenIssued          AuditEventType = "token_issued"
+	// AuditEventTokenRevoked represents a token revocation event
+	AuditEventTokenRevoked         AuditEventType = "token_revoked"
+	// AuditEventAuthenticationFailed represents an authentication failure event
+	AuditEventAuthenticationFailed AuditEventType = "authentication_failed"
+	// AuditEventAuthenticationSuccess represents an authentication success event
+	AuditEventAuthenticationSuccess AuditEventType = "authentication_success"
+	// AuditEventAuthorizationDenied represents an authorization denial event
+	AuditEventAuthorizationDenied  AuditEventType = "authorization_denied"
+	// AuditEventKeyRotated represents a key rotation event
+	AuditEventKeyRotated           AuditEventType = "key_rotated"
+	// AuditEventRateLimitExceeded represents a rate limit exceeded event
+	AuditEventRateLimitExceeded    AuditEventType = "rate_limit_exceeded"
+	// AuditEventSuspiciousActivity represents a suspicious activity event
+	AuditEventSuspiciousActivity   AuditEventType = "suspicious_activity"
+	// AuditEventTokenIssue represents a token issuance event
+	AuditEventTokenIssue           AuditEventType = "token_issue"
+	// AuditEventTokenRevoke represents a token revocation event
+	AuditEventTokenRevoke          AuditEventType = "token_revoke"
+	// AuditEventKeyRotation represents a key rotation event
+	AuditEventKeyRotation          AuditEventType = "key_rotation"
 )
 
-// AuditEventResult represents the result of an audited event
-type AuditEventResult string
+// AuditResult represents the result of an audited event
+type AuditResult string
 
 const (
 	// AuditResultSuccess indicates the event completed successfully
-	AuditResultSuccess AuditEventResult = "success"
+	AuditResultSuccess AuditResult = "success"
 
 	// AuditResultFailure indicates the event failed
-	AuditResultFailure AuditEventResult = "failure"
+	AuditResultFailure AuditResult = "failure"
 
 	// AuditResultPartial indicates the event partially succeeded
-	AuditResultPartial AuditEventResult = "partial"
+	AuditResultPartial AuditResult = "partial"
+)
+
+// ErrorType represents the type of error
+type ErrorType string
+
+const (
+	// ErrorTypeVaultAPI represents a Vault API error
+	ErrorTypeVaultAPI ErrorType = "vault_api"
 )
 
 // ================================================================================
@@ -397,21 +440,47 @@ const (
 // Device Trust Level Constants
 // ================================================================================
 
-// DeviceTrustLevel represents the trust level of a device
-type DeviceTrustLevel string
+// TrustLevel represents the trust level of a device
+type TrustLevel string
 
 const (
 	// TrustLevelHigh indicates high trust (TPM/TEE bound, hardware fingerprint)
-	TrustLevelHigh DeviceTrustLevel = "high"
+	TrustLevelHigh TrustLevel = "high"
 
 	// TrustLevelMedium indicates medium trust (software fingerprint, behavior pattern)
-	TrustLevelMedium DeviceTrustLevel = "medium"
+	TrustLevelMedium TrustLevel = "medium"
 
 	// TrustLevelLow indicates low trust (basic identification only)
-	TrustLevelLow DeviceTrustLevel = "low"
+	TrustLevelLow TrustLevel = "low"
 
 	// TrustLevelUntrusted indicates untrusted device (anomalous behavior detected)
-	TrustLevelUntrusted DeviceTrustLevel = "untrusted"
+	TrustLevelUntrusted TrustLevel = "untrusted"
+	// TrustLevelNone indicates no trust level
+	TrustLevelNone TrustLevel = "none"
+)
+
+// DeviceType represents the type of device
+type DeviceType string
+
+const (
+	// DeviceTypePhysical represents a physical device
+	DeviceTypePhysical DeviceType = "physical"
+	// DeviceTypeVirtual represents a virtual device
+	DeviceTypeVirtual DeviceType = "virtual"
+)
+
+// DeviceStatus represents the status of a device
+type DeviceStatus string
+
+const (
+	// DeviceStatusActive represents an active device
+	DeviceStatusActive DeviceStatus = "active"
+	// DeviceStatusInactive represents an inactive device
+	DeviceStatusInactive DeviceStatus = "inactive"
+	// DeviceStatusSuspended represents a suspended device
+	DeviceStatusSuspended DeviceStatus = "suspended"
+	// DeviceStatusRevoked represents a revoked device
+	DeviceStatusRevoked DeviceStatus = "revoked"
 )
 
 // ================================================================================
@@ -591,5 +660,3 @@ var DefaultAgentScopes = []Scope{
 	ScopeAgentWrite,
 	ScopeIntelligenceQuery,
 }
-
-//Personal.AI order the ending

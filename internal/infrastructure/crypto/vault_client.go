@@ -169,13 +169,13 @@ func NewVaultClient(config *VaultConfig, log logger.Logger) (*VaultClient, error
 	// Start automatic token renewal if enabled
 	if config.TokenRenewal {
 		if err := vc.startTokenRenewal(context.Background()); err != nil {
-			log.Warn("Failed to start token renewal", "error", err)
+			log.Warn(context.Background(), "Failed to start token renewal", logger.Error(err))
 		}
 	}
 
-	log.Info("Vault client initialized",
-		"address", config.Address,
-		"namespace", config.Namespace,
+	log.Info(context.Background(), "Vault client initialized",
+		logger.String("address", config.Address),
+		logger.String("namespace", config.Namespace),
 	)
 
 	return vc, nil
@@ -194,7 +194,7 @@ func (vc *VaultClient) startTokenRenewal(ctx context.Context) error {
 
 	renewable, _ := secret.TokenIsRenewable()
 	if !renewable {
-		vc.logger.Warn("Token is not renewable, skipping renewal setup")
+		vc.logger.Warn(ctx, "Token is not renewable, skipping renewal setup")
 		return nil
 	}
 
@@ -213,7 +213,7 @@ func (vc *VaultClient) startTokenRenewal(ctx context.Context) error {
 
 	go vc.renewalLoop(renewCtx, renewer)
 
-	vc.logger.Info("Token renewal started")
+	vc.logger.Info(ctx, "Token renewal started")
 	return nil
 }
 
@@ -226,18 +226,18 @@ func (vc *VaultClient) renewalLoop(ctx context.Context, renewer *vault.Renewer) 
 		select {
 		case err := <-renewer.DoneCh():
 			if err != nil {
-				vc.logger.Error("Token renewal failed", "error", err)
+				vc.logger.Error(ctx, "Token renewal failed", err)
 			}
-			vc.logger.Info("Token renewal stopped")
+			vc.logger.Info(ctx, "Token renewal stopped")
 			return
 
 		case renewal := <-renewer.RenewCh():
-			vc.logger.Debug("Token renewed",
-				"lease_duration", renewal.Secret.LeaseDuration,
+			vc.logger.Debug(ctx, "Token renewed",
+				logger.Int("lease_duration", renewal.Secret.LeaseDuration),
 			)
 
 		case <-ctx.Done():
-			vc.logger.Info("Token renewal cancelled")
+			vc.logger.Info(ctx, "Token renewal cancelled")
 			return
 		}
 	}
@@ -258,7 +258,7 @@ func (vc *VaultClient) StopTokenRenewal() {
 		vc.tokenRenewer = nil
 	}
 
-	vc.logger.Info("Token renewal stopped")
+	vc.logger.Info(context.Background(), "Token renewal stopped")
 }
 
 // WriteSecret writes a secret to Vault KV store.
@@ -278,14 +278,13 @@ func (vc *VaultClient) WriteSecret(ctx context.Context, path string, data Secret
 
 	_, err := vc.client.Logical().WriteWithContext(ctx, path, wrappedData)
 	if err != nil {
-		vc.logger.Error("Failed to write secret",
-			"path", path,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to write secret", err,
+			logger.String("path", path),
 		)
 		return fmt.Errorf("failed to write secret: %w", err)
 	}
 
-	vc.logger.Debug("Secret written", "path", path)
+	vc.logger.Debug(ctx, "Secret written", logger.String("path", path))
 	return nil
 }
 
@@ -301,9 +300,8 @@ func (vc *VaultClient) WriteSecret(ctx context.Context, path string, data Secret
 func (vc *VaultClient) ReadSecret(ctx context.Context, path string) (SecretData, error) {
 	secret, err := vc.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		vc.logger.Error("Failed to read secret",
-			"path", path,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to read secret", err,
+			logger.String("path", path),
 		)
 		return nil, fmt.Errorf("failed to read secret: %w", err)
 	}
@@ -315,13 +313,13 @@ func (vc *VaultClient) ReadSecret(ctx context.Context, path string) (SecretData,
 	// For KV v2, extract data from "data" field
 	if dataRaw, ok := secret.Data["data"]; ok {
 		if data, ok := dataRaw.(map[string]interface{}); ok {
-			vc.logger.Debug("Secret read", "path", path)
+			vc.logger.Debug(ctx, "Secret read", logger.String("path", path))
 			return data, nil
 		}
 	}
 
 	// Fallback for KV v1 or direct data access
-	vc.logger.Debug("Secret read", "path", path)
+	vc.logger.Debug(ctx, "Secret read", logger.String("path", path))
 	return secret.Data, nil
 }
 
@@ -336,14 +334,13 @@ func (vc *VaultClient) ReadSecret(ctx context.Context, path string) (SecretData,
 func (vc *VaultClient) DeleteSecret(ctx context.Context, path string) error {
 	_, err := vc.client.Logical().DeleteWithContext(ctx, path)
 	if err != nil {
-		vc.logger.Error("Failed to delete secret",
-			"path", path,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to delete secret", err,
+			logger.String("path", path),
 		)
 		return fmt.Errorf("failed to delete secret: %w", err)
 	}
 
-	vc.logger.Debug("Secret deleted", "path", path)
+	vc.logger.Debug(ctx, "Secret deleted", logger.String("path", path))
 	return nil
 }
 
@@ -359,9 +356,8 @@ func (vc *VaultClient) DeleteSecret(ctx context.Context, path string) error {
 func (vc *VaultClient) ListSecrets(ctx context.Context, path string) ([]string, error) {
 	secret, err := vc.client.Logical().ListWithContext(ctx, path)
 	if err != nil {
-		vc.logger.Error("Failed to list secrets",
-			"path", path,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to list secrets", err,
+			logger.String("path", path),
 		)
 		return nil, fmt.Errorf("failed to list secrets: %w", err)
 	}
@@ -414,9 +410,8 @@ func (vc *VaultClient) Encrypt(ctx context.Context, keyName string, req *Encrypt
 	// Perform encryption
 	secret, err := vc.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		vc.logger.Error("Failed to encrypt data",
-			"key", keyName,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to encrypt data", err,
+			logger.String("key", keyName),
 		)
 		return nil, fmt.Errorf("failed to encrypt: %w", err)
 	}
@@ -434,9 +429,9 @@ func (vc *VaultClient) Encrypt(ctx context.Context, keyName string, req *Encrypt
 		response.KeyVersion = keyVersion
 	}
 
-	vc.logger.Debug("Data encrypted",
-		"key", keyName,
-		"key_version", response.KeyVersion,
+	vc.logger.Debug(ctx, "Data encrypted",
+		logger.String("key", keyName),
+		logger.Int("key_version", response.KeyVersion),
 	)
 
 	return response, nil
@@ -467,9 +462,8 @@ func (vc *VaultClient) Decrypt(ctx context.Context, keyName string, req *Decrypt
 	// Perform decryption
 	secret, err := vc.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		vc.logger.Error("Failed to decrypt data",
-			"key", keyName,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to decrypt data", err,
+			logger.String("key", keyName),
 		)
 		return nil, fmt.Errorf("failed to decrypt: %w", err)
 	}
@@ -492,9 +486,9 @@ func (vc *VaultClient) Decrypt(ctx context.Context, keyName string, req *Decrypt
 		response.KeyVersion = keyVersion
 	}
 
-	vc.logger.Debug("Data decrypted",
-		"key", keyName,
-		"key_version", response.KeyVersion,
+	vc.logger.Debug(ctx, "Data decrypted",
+		logger.String("key", keyName),
+		logger.Int("key_version", response.KeyVersion),
 	)
 
 	return response, nil
@@ -520,10 +514,9 @@ func (vc *VaultClient) GenerateDataKey(ctx context.Context, keyName string, bits
 
 	secret, err := vc.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		vc.logger.Error("Failed to generate data key",
-			"key", keyName,
-			"bits", bits,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to generate data key", err,
+			logger.String("key", keyName),
+			logger.Int("bits", bits),
 		)
 		return nil, "", fmt.Errorf("failed to generate data key: %w", err)
 	}
@@ -543,9 +536,9 @@ func (vc *VaultClient) GenerateDataKey(ctx context.Context, keyName string, bits
 		return nil, "", fmt.Errorf("failed to decode plaintext: %w", err)
 	}
 
-	vc.logger.Debug("Data key generated",
-		"key", keyName,
-		"bits", bits,
+	vc.logger.Debug(ctx, "Data key generated",
+		logger.String("key", keyName),
+		logger.Int("bits", bits),
 	)
 
 	return plaintext, ciphertext, nil
@@ -565,9 +558,8 @@ func (vc *VaultClient) GetDynamicDBCredentials(ctx context.Context, role string)
 
 	secret, err := vc.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		vc.logger.Error("Failed to get dynamic DB credentials",
-			"role", role,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to get dynamic DB credentials", err,
+			logger.String("role", role),
 		)
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
@@ -587,10 +579,10 @@ func (vc *VaultClient) GetDynamicDBCredentials(ctx context.Context, role string)
 		Renewable:     secret.Renewable,
 	}
 
-	vc.logger.Debug("Dynamic DB credentials generated",
-		"role", role,
-		"username", username,
-		"lease_duration", creds.LeaseDuration,
+	vc.logger.Debug(ctx, "Dynamic DB credentials generated",
+		logger.String("role", role),
+		logger.String("username", username),
+		logger.Duration("lease_duration", creds.LeaseDuration),
 	)
 
 	return creds, nil
@@ -611,18 +603,17 @@ func (vc *VaultClient) RenewLease(ctx context.Context, leaseID string, increment
 
 	secret, err := vc.client.Sys().RenewWithContext(ctx, leaseID, incrementSeconds)
 	if err != nil {
-		vc.logger.Error("Failed to renew lease",
-			"lease_id", leaseID,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to renew lease", err,
+			logger.String("lease_id", leaseID),
 		)
 		return 0, fmt.Errorf("failed to renew lease: %w", err)
 	}
 
 	duration := time.Duration(secret.LeaseDuration) * time.Second
 
-	vc.logger.Debug("Lease renewed",
-		"lease_id", leaseID,
-		"duration", duration,
+	vc.logger.Debug(ctx, "Lease renewed",
+		logger.String("lease_id", leaseID),
+		logger.Duration("duration", duration),
 	)
 
 	return duration, nil
@@ -639,14 +630,13 @@ func (vc *VaultClient) RenewLease(ctx context.Context, leaseID string, increment
 func (vc *VaultClient) RevokeLease(ctx context.Context, leaseID string) error {
 	err := vc.client.Sys().RevokeWithContext(ctx, leaseID)
 	if err != nil {
-		vc.logger.Error("Failed to revoke lease",
-			"lease_id", leaseID,
-			"error", err,
+		vc.logger.Error(ctx, "Failed to revoke lease", err,
+			logger.String("lease_id", leaseID),
 		)
 		return fmt.Errorf("failed to revoke lease: %w", err)
 	}
 
-	vc.logger.Debug("Lease revoked", "lease_id", leaseID)
+	vc.logger.Debug(ctx, "Lease revoked", logger.String("lease_id", leaseID))
 	return nil
 }
 
@@ -661,16 +651,16 @@ func (vc *VaultClient) RevokeLease(ctx context.Context, leaseID string) error {
 func (vc *VaultClient) Health(ctx context.Context) (bool, error) {
 	health, err := vc.client.Sys().HealthWithContext(ctx)
 	if err != nil {
-		vc.logger.Error("Health check failed", "error", err)
+		vc.logger.Error(ctx, "Health check failed", err)
 		return false, err
 	}
 
 	isHealthy := health.Initialized && !health.Sealed
 
-	vc.logger.Debug("Health check completed",
-		"initialized", health.Initialized,
-		"sealed", health.Sealed,
-		"healthy", isHealthy,
+	vc.logger.Debug(ctx, "Health check completed",
+		logger.Bool("initialized", health.Initialized),
+		logger.Bool("sealed", health.Sealed),
+		logger.Bool("healthy", isHealthy),
 	)
 
 	return isHealthy, nil
@@ -679,6 +669,6 @@ func (vc *VaultClient) Health(ctx context.Context) (bool, error) {
 // Close closes the Vault client and stops token renewal.
 func (vc *VaultClient) Close() error {
 	vc.StopTokenRenewal()
-	vc.logger.Info("Vault client closed")
+	vc.logger.Info(context.Background(), "Vault client closed")
 	return nil
 }

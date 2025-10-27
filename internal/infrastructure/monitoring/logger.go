@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/turtacn/cbc/internal/config"
+	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
@@ -18,6 +19,7 @@ import (
 type zapLogger struct {
 	logger *zap.Logger
 	sugar  *zap.SugaredLogger
+	level  zap.AtomicLevel
 }
 
 // NewLogger 创建并初始化日志实例
@@ -40,16 +42,17 @@ func NewLogger(cfg *config.Config) (logger.Logger, error) {
 
 	// 解析日志级别
 	level := parseLogLevel(cfg.Log.Level)
+	atomicLevel := zap.NewAtomicLevelAt(level)
 
 	// 构建核心配置
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderConfig),
-		zapcore.NewMultiWriteSyncer(getWriteSyncers(cfg.Log.Output)...),
-		zap.NewAtomicLevelAt(level),
+		zapcore.NewMultiWriteSyncer(getWriteSyncers(cfg.Log.OutputPath)...),
+		atomicLevel,
 	)
 
 	// 创建 logger
-	zapLogger := zap.New(
+	zLog := zap.New(
 		core,
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
@@ -57,8 +60,9 @@ func NewLogger(cfg *config.Config) (logger.Logger, error) {
 	)
 
 	return &zapLogger{
-		logger: zapLogger,
-		sugar:  zapLogger.Sugar(),
+		logger: zLog,
+		sugar:  zLog.Sugar(),
+		level:  atomicLevel,
 	}, nil
 }
 
@@ -103,28 +107,30 @@ func getWriteSyncers(outputs []string) []zapcore.WriteSyncer {
 }
 
 // Debug 记录调试级别日志
-func (l *zapLogger) Debug(msg string, fields ...logger.Field) {
+func (l *zapLogger) Debug(ctx context.Context, msg string, fields ...logger.Field) {
 	l.logger.Debug(msg, convertFields(fields)...)
 }
 
 // Info 记录信息级别日志
-func (l *zapLogger) Info(msg string, fields ...logger.Field) {
+func (l *zapLogger) Info(ctx context.Context, msg string, fields ...logger.Field) {
 	l.logger.Info(msg, convertFields(fields)...)
 }
 
 // Warn 记录警告级别日志
-func (l *zapLogger) Warn(msg string, fields ...logger.Field) {
+func (l *zapLogger) Warn(ctx context.Context, msg string, fields ...logger.Field) {
 	l.logger.Warn(msg, convertFields(fields)...)
 }
 
 // Error 记录错误级别日志
-func (l *zapLogger) Error(msg string, fields ...logger.Field) {
-	l.logger.Error(msg, convertFields(fields)...)
+func (l *zapLogger) Error(ctx context.Context, msg string, err error, fields ...logger.Field) {
+	allFields := append(fields, logger.Field{Key: "error", Value: err})
+	l.logger.Error(msg, convertFields(allFields)...)
 }
 
 // Fatal 记录致命错误日志并终止程序
-func (l *zapLogger) Fatal(msg string, fields ...logger.Field) {
-	l.logger.Fatal(msg, convertFields(fields)...)
+func (l *zapLogger) Fatal(ctx context.Context, msg string, err error, fields ...logger.Field) {
+	allFields := append(fields, logger.Field{Key: "error", Value: err})
+	l.logger.Fatal(msg, convertFields(allFields)...)
 }
 
 // WithFields 创建带有预设字段的日志记录器
@@ -132,16 +138,36 @@ func (l *zapLogger) WithFields(fields ...logger.Field) logger.Logger {
 	return &zapLogger{
 		logger: l.logger.With(convertFields(fields)...),
 		sugar:  l.sugar.With(convertFieldsToInterfaces(fields)...),
+		level:  l.level,
 	}
 }
 
-// WithContext 创建带有上下文信息的日志记录器
-func (l *zapLogger) WithContext(ctx context.Context) logger.Logger {
-	fields := extractContextFields(ctx)
-	if len(fields) == 0 {
-		return l
+// WithComponent creates a new logger for a specific component
+func (l *zapLogger) WithComponent(component string) logger.Logger {
+	return l.WithFields(logger.String("component", component))
+}
+
+// SetLevel sets the logging level
+func (l *zapLogger) SetLevel(level constants.LogLevel) {
+	l.level.SetLevel(parseLogLevel(string(level)))
+}
+
+// GetLevel returns the current logging level
+func (l *zapLogger) GetLevel() constants.LogLevel {
+	switch l.level.Level() {
+	case zapcore.DebugLevel:
+		return constants.LogLevelDebug
+	case zapcore.InfoLevel:
+		return constants.LogLevelInfo
+	case zapcore.WarnLevel:
+		return constants.LogLevelWarn
+	case zapcore.ErrorLevel:
+		return constants.LogLevelError
+	case zapcore.FatalLevel:
+		return constants.LogLevelFatal
+	default:
+		return constants.LogLevelInfo
 	}
-	return l.WithFields(fields...)
 }
 
 // Sync 刷新日志缓冲区
@@ -237,10 +263,8 @@ func LogOperation(log logger.Logger, operation string, duration time.Duration, e
 
 	if err != nil {
 		allFields = append(allFields, logger.Field{Key: "error", Value: err.Error()})
-		log.Error(fmt.Sprintf("operation %s failed", operation), allFields...)
+		log.Error(context.Background(), fmt.Sprintf("operation %s failed", operation), err, allFields...)
 	} else {
-		log.Info(fmt.Sprintf("operation %s completed", operation), allFields...)
+		log.Info(context.Background(), fmt.Sprintf("operation %s completed", operation), allFields...)
 	}
 }
-
-//Personal.AI order the ending

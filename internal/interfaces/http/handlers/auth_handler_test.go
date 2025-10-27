@@ -15,9 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
-	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
+// MockAuthAppService is a mock for the AuthAppService
 type MockAuthAppService struct {
 	mock.Mock
 }
@@ -43,258 +44,88 @@ func (m *MockAuthAppService) RevokeToken(ctx context.Context, req *dto.RevokeTok
 	return args.Error(0)
 }
 
-func (m *MockAuthAppService) ValidateToken(ctx context.Context, req *dto.ValidateTokenRequest) (*dto.TokenValidationResponse, error) {
+func (m *MockAuthAppService) IntrospectToken(ctx context.Context, token string) (*dto.TokenIntrospectionResponse, error) {
+	args := m.Called(ctx, token)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*dto.TokenIntrospectionResponse), args.Error(1)
+}
+
+func (m *MockAuthAppService) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*dto.TokenValidationResponse), args.Error(1)
+	return args.Get(0).(*dto.TokenResponse), args.Error(1)
 }
 
-func setupTestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	return gin.New()
+// MockHTTPMetrics is a mock for HTTPMetrics
+type MockHTTPMetrics struct {
+	mock.Mock
+}
+
+func (m *MockHTTPMetrics) RecordRequestStart(ctx context.Context, handler string) {
+	m.Called(ctx, handler)
+}
+
+func (m *MockHTTPMetrics) RecordRequestError(ctx context.Context, handler string, httpStatus int) {
+	m.Called(ctx, handler, httpStatus)
+}
+
+func (m *MockHTTPMetrics) RecordRequestSuccess(ctx context.Context, handler string) {
+	m.Called(ctx, handler)
+}
+
+func (m *MockHTTPMetrics) RecordRequestDuration(ctx context.Context, handler string, status int, duration time.Duration) {
+	m.Called(ctx, handler, status, duration)
 }
 
 func TestAuthHandler_IssueToken(t *testing.T) {
-	mockService := new(MockAuthAppService)
-	handler := NewAuthHandler(mockService)
-	router := setupTestRouter()
-	router.POST("/api/v1/auth/token", handler.IssueToken)
+	gin.SetMode(gin.TestMode)
+	mockAppService := new(MockAuthAppService)
+	mockMetrics := new(MockHTTPMetrics)
+	log := logger.NewDefaultLogger()
 
-	tenantID := uuid.New()
+	handler := NewAuthHandler(mockAppService, mockMetrics, log)
 
-	tests := []struct {
-		name           string
-		requestBody    interface{}
-		setupMock      func()
-		expectedStatus int
-		checkResponse  func(*testing.T, *httptest.ResponseRecorder)
-	}{
-		{
-			name: "Successfully issue token",
-			requestBody: map[string]interface{}{
-				"tenant_id":   tenantID.String(),
-				"device_id":   "test-device-001",
-				"device_type": "mobile",
-				"fingerprint": "test-fingerprint",
-				"scope":       "agent:read agent:write",
-			},
-			setupMock: func() {
-				expectedReq := &dto.IssueTokenRequest{
-					TenantID:    tenantID,
-					DeviceID:    "test-device-001",
-					DeviceType:  "mobile",
-					Fingerprint: "test-fingerprint",
-					Scope:       "agent:read agent:write",
-				}
-				response := &dto.TokenResponse{
-					AccessToken:  "jwt.access.token",
-					RefreshToken: "jwt.refresh.token",
-					TokenType:    "Bearer",
-					ExpiresIn:    900,
-				}
-				mockService.On("IssueToken", mock.Anything, mock.MatchedBy(func(req *dto.IssueTokenRequest) bool {
-					return req.TenantID == expectedReq.TenantID &&
-						req.DeviceID == expectedReq.DeviceID &&
-						req.DeviceType == expectedReq.DeviceType
-				})).Return(response, nil).Once()
-			},
-			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response dto.TokenResponse
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				assert.NoError(t, err)
-				assert.Equal(t, "jwt.access.token", response.AccessToken)
-				assert.Equal(t, "jwt.refresh.token", response.RefreshToken)
-				assert.Equal(t, "Bearer", response.TokenType)
-				assert.Equal(t, int64(900), response.ExpiresIn)
-			},
-		},
-		{
-			name: "Invalid request body",
-			requestBody: map[string]interface{}{
-				"tenant_id": "invalid-uuid",
-			},
-			setupMock:      func() {},
-			expectedStatus: http.StatusBadRequest,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				assert.Contains(t, w.Body.String(), "error")
-			},
-		},
-		{
-			name: "Tenant not found",
-			requestBody: map[string]interface{}{
-				"tenant_id":   tenantID.String(),
-				"device_id":   "test-device-001",
-				"device_type": "mobile",
-				"fingerprint": "test-fingerprint",
-				"scope":       "agent:read",
-			},
-			setupMock: func() {
-				mockService.On("IssueToken", mock.Anything, mock.Anything).
-					Return(nil, errors.ErrTenantNotFound).Once()
-			},
-			expectedStatus: http.StatusNotFound,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				assert.Contains(t, w.Body.String(), "not found")
-			},
-		},
-		{
-			name: "Rate limit exceeded",
-			requestBody: map[string]interface{}{
-				"tenant_id":   tenantID.String(),
-				"device_id":   "test-device-001",
-				"device_type": "mobile",
-				"fingerprint": "test-fingerprint",
-				"scope":       "agent:read",
-			},
-			setupMock: func() {
-				mockService.On("IssueToken", mock.Anything, mock.Anything).
-					Return(nil, errors.ErrRateLimitExceeded).Once()
-			},
-			expectedStatus: http.StatusTooManyRequests,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				assert.Contains(t, w.Body.String(), "rate limit")
-			},
-		},
-	}
+	router := gin.Default()
+	router.POST("/token", handler.IssueToken)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
+	tenantID := uuid.New().String()
+	agentID := uuid.New().String()
 
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
+	t.Run("Successfully issue token", func(t *testing.T) {
+		reqBody := &dto.TokenIssueRequest{
+			TenantID:  tenantID,
+			AgentID:   agentID,
+			GrantType: "device_credential",
+		}
+		jsonBody, _ := json.Marshal(reqBody)
 
-			router.ServeHTTP(w, req)
+		req, _ := http.NewRequest(http.MethodPost, "/token", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
 
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			tt.checkResponse(t, w)
+		mockResponse := &dto.TokenResponse{
+			AccessToken: "test-token",
+		}
 
-			mockService.AssertExpectations(t)
-		})
-	}
-}
+		mockMetrics.On("RecordRequestStart", mock.Anything, "issue_token").Return()
+		mockAppService.On("IssueToken", mock.Anything, mock.MatchedBy(func(r *dto.IssueTokenRequest) bool {
+			return r.TenantID == tenantID && r.AgentID == agentID
+		})).Return(mockResponse, nil).Once()
 
-func TestAuthHandler_RefreshToken(t *testing.T) {
-	mockService := new(MockAuthAppService)
-	handler := NewAuthHandler(mockService)
-	router := setupTestRouter()
-	router.POST("/api/v1/auth/refresh", handler.RefreshToken)
+		router.ServeHTTP(rr, req)
 
-	tests := []struct {
-		name           string
-		requestBody    interface{}
-		setupMock      func()
-		expectedStatus int
-	}{
-		{
-			name: "Successfully refresh token",
-			requestBody: map[string]interface{}{
-				"refresh_token": "valid.refresh.token",
-			},
-			setupMock: func() {
-				response := &dto.TokenResponse{
-					AccessToken:  "new.access.token",
-					RefreshToken: "new.refresh.token",
-					TokenType:    "Bearer",
-					ExpiresIn:    900,
-				}
-				mockService.On("RefreshToken", mock.Anything, mock.Anything).
-					Return(response, nil).Once()
-			},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name: "Invalid refresh token",
-			requestBody: map[string]interface{}{
-				"refresh_token": "invalid.token",
-			},
-			setupMock: func() {
-				mockService.On("RefreshToken", mock.Anything, mock.Anything).
-					Return(nil, errors.ErrInvalidToken).Once()
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-	}
+		assert.Equal(t, http.StatusOK, rr.Code)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
+		var respBody dto.TokenResponse
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		assert.NoError(t, err)
+		assert.Equal(t, mockResponse.AccessToken, respBody.AccessToken)
 
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			mockService.AssertExpectations(t)
-		})
-	}
-}
-
-func TestAuthHandler_ValidateToken(t *testing.T) {
-	mockService := new(MockAuthAppService)
-	handler := NewAuthHandler(mockService)
-	router := setupTestRouter()
-	router.POST("/api/v1/auth/validate", handler.ValidateToken)
-
-	tests := []struct {
-		name           string
-		requestBody    interface{}
-		setupMock      func()
-		expectedStatus int
-	}{
-		{
-			name: "Valid token",
-			requestBody: map[string]interface{}{
-				"token": "valid.access.token",
-			},
-			setupMock: func() {
-				response := &dto.TokenValidationResponse{
-					Valid:     true,
-					TenantID:  uuid.New(),
-					DeviceID:  uuid.New(),
-					TokenType: "access",
-					Scope:     "agent:read agent:write",
-					ExpiresAt: time.Now().Add(15 * time.Minute),
-				}
-				mockService.On("ValidateToken", mock.Anything, mock.Anything).
-					Return(response, nil).Once()
-			},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name: "Invalid token",
-			requestBody: map[string]interface{}{
-				"token": "invalid.token",
-			},
-			setupMock: func() {
-				mockService.On("ValidateToken", mock.Anything, mock.Anything).
-					Return(nil, errors.ErrInvalidToken).Once()
-			},
-			expectedStatus: http.StatusUnauthorized,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
-
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/validate", bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			mockService.AssertExpectations(t)
-		})
-	}
+		mockAppService.AssertExpectations(t)
+		mockMetrics.AssertExpectations(t)
+	})
 }

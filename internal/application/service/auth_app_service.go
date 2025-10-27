@@ -10,6 +10,7 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
 	domainService "github.com/turtacn/cbc/internal/domain/service"
+	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
 	"github.com/turtacn/cbc/pkg/utils"
@@ -63,103 +64,96 @@ func NewAuthAppService(
 func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error) {
 	// Validate request
 	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid register device request", "error", err)
-		return nil, errors.ErrInvalidRequest.Wrap(err)
+		s.logger.Error(ctx, "Invalid register device request", err)
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid register device request")
 	}
 
 	// Check tenant status
-	tenant, err := s.tenantRepo.GetByID(ctx, req.TenantID)
+	tenant, err := s.tenantRepo.FindByID(ctx, req.TenantID)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to get tenant", "tenant_id", req.TenantID, "error", err)
-		return nil, errors.ErrTenantNotFound.Wrap(err)
+		s.logger.Error(ctx, "Failed to get tenant", err, logger.String("tenant_id", req.TenantID))
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "failed to get tenant")
 	}
 
-	if tenant.Status != models.TenantStatusActive {
-		s.logger.Warn(ctx, "Tenant is not active", "tenant_id", req.TenantID, "status", tenant.Status)
-		return nil, errors.ErrTenantInactive
+	if tenant.Status != constants.TenantStatusActive {
+		s.logger.Warn(ctx, "Tenant is not active", logger.String("tenant_id", req.TenantID), logger.String("status", string(tenant.Status)))
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "tenant is not active", "")
 	}
 
 	// Check rate limit for MGR
-	rateLimitKey := fmt.Sprintf("mgr:%s:register", req.MgrClientID)
-	allowed, err := s.rateLimitService.AllowRequest(ctx, rateLimitKey, 100, time.Minute)
+	rateLimitKey := fmt.Sprintf("mgr:%s:register", req.ClientID)
+	allowed, _, _, err := s.rateLimitService.Allow(ctx, "mgr", rateLimitKey, "register")
 	if err != nil {
-		s.logger.Error(ctx, "Failed to check rate limit", "key", rateLimitKey, "error", err)
-		return nil, errors.ErrInternalServer.Wrap(err)
+		s.logger.Error(ctx, "Failed to check rate limit", err, logger.String("key", rateLimitKey))
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check rate limit")
 	}
 	if !allowed {
-		s.logger.Warn(ctx, "Rate limit exceeded for MGR", "mgr_client_id", req.MgrClientID)
-		return nil, errors.ErrRateLimitExceeded
+		s.logger.Warn(ctx, "Rate limit exceeded for MGR", logger.String("mgr_client_id", req.ClientID))
+		return nil, errors.New(errors.ErrCodeRateLimitExceeded, "rate limit exceeded for MGR", "")
 	}
 
 	// Check if device already exists
-	existingDevice, err := s.deviceRepo.GetByAgentID(ctx, req.AgentID)
+	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
 	if err != nil && !errors.IsNotFoundError(err) {
-		s.logger.Error(ctx, "Failed to check device existence", "agent_id", req.AgentID, "error", err)
-		return nil, errors.ErrInternalServer.Wrap(err)
+		s.logger.Error(ctx, "Failed to check device existence", err, logger.String("agent_id", req.AgentID))
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check device existence")
 	}
 
 	if existingDevice != nil {
 		// Device already registered, check device fingerprint
 		if existingDevice.DeviceFingerprint != req.DeviceFingerprint {
-			s.logger.Warn(ctx, "Device fingerprint mismatch", "agent_id", req.AgentID)
-			return nil, errors.ErrDeviceFingerprintMismatch
+			s.logger.Warn(ctx, "Device fingerprint mismatch", logger.String("agent_id", req.AgentID))
+			return nil, errors.New(errors.ErrCodeInvalidRequest, "device fingerprint mismatch", "")
 		}
 
 		// Return existing refresh token if still valid
-		s.logger.Info(ctx, "Device already registered, returning existing token", "agent_id", req.AgentID)
+		s.logger.Info(ctx, "Device already registered, returning existing token", logger.String("agent_id", req.AgentID))
 	} else {
 		// Create new device
 		device := &models.Device{
-			AgentID:           req.AgentID,
+			// AgentID:           req.AgentID,
 			TenantID:          req.TenantID,
 			DeviceFingerprint: req.DeviceFingerprint,
-			DeviceName:        req.DeviceName,
-			DeviceType:        req.DeviceType,
-			TrustLevel:        models.TrustLevelHigh,
-			Status:            models.DeviceStatusActive,
+			// DeviceName:        req.DeviceName,
+			// DeviceType:        req.DeviceType,
+			// TrustLevel:        s.calculateInitialTrustLevel(req),
+			Status:            constants.DeviceStatusActive,
 			RegisteredAt:      time.Now(),
 			LastSeenAt:        time.Now(),
-			IPAddress:         req.IPAddress,
-			UserAgent:         req.UserAgent,
+			// IPAddress:         req.IPAddress,
+			// UserAgent:         req.UserAgent,
+			// Metadata:          req.Metadata,
 		}
 
-		if err := s.deviceRepo.Create(ctx, device); err != nil {
-			s.logger.Error(ctx, "Failed to create device", "agent_id", req.AgentID, "error", err)
-			return nil, errors.ErrInternalServer.Wrap(err)
+		if err := s.deviceRepo.Save(ctx, device); err != nil {
+			s.logger.Error(ctx, "Failed to create device", err, logger.String("agent_id", req.AgentID))
+			return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create device")
 		}
 
-		s.logger.Info(ctx, "Device registered successfully", "agent_id", req.AgentID)
+		s.logger.Info(ctx, "Device registered successfully", logger.String("agent_id", req.AgentID))
 	}
 
 	// Issue token pair using domain service
-	tokenPair, err := s.tokenService.IssueTokenPair(ctx, &domainService.TokenRequest{
-		TenantID:    req.TenantID,
-		AgentID:     req.AgentID,
-		Scope:       req.Scope,
-		DeviceInfo:  req.DeviceFingerprint,
-		TrustLevel:  models.TrustLevelHigh,
-		IPAddress:   req.IPAddress,
-		UserAgent:   req.UserAgent,
-	})
+	refreshToken, accessToken, err := s.tokenService.IssueTokenPair(ctx, req.TenantID, req.AgentID, req.DeviceFingerprint, nil, nil)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to issue token pair", "agent_id", req.AgentID, "error", err)
+		s.logger.Error(ctx, "Failed to issue token pair", err, logger.String("agent_id", req.AgentID))
 		return nil, err
 	}
 
 	// Record audit log
 	s.logger.Info(ctx, "Device registration and token issuance successful",
-		"tenant_id", req.TenantID,
-		"agent_id", req.AgentID,
-		"mgr_client_id", req.MgrClientID,
+		logger.String("tenant_id", req.TenantID),
+		logger.String("agent_id", req.AgentID),
+		logger.String("mgr_client_id", req.ClientID),
 	)
 
 	return &dto.TokenResponse{
-		AccessToken:           tokenPair.AccessToken,
-		RefreshToken:          tokenPair.RefreshToken,
-		TokenType:             "Bearer",
-		ExpiresIn:             int(tokenPair.AccessTokenExpiresIn.Seconds()),
-		RefreshTokenExpiresIn: int(tokenPair.RefreshTokenExpiresIn.Seconds()),
-		Scope:                 tokenPair.Scope,
+		AccessToken:  accessToken.JTI,
+		RefreshToken: refreshToken.JTI,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(accessToken.TimeUntilExpiry().Seconds()),
+		Scope:        accessToken.Scope,
+		IssuedAt:     accessToken.IssuedAt.Unix(),
 	}, nil
 }
 
@@ -167,81 +161,73 @@ func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regist
 func (s *authAppServiceImpl) IssueToken(ctx context.Context, req *dto.IssueTokenRequest) (*dto.TokenResponse, error) {
 	// Validate request
 	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid issue token request", "error", err)
-		return nil, errors.ErrInvalidRequest.Wrap(err)
+		s.logger.Error(ctx, "Invalid issue token request", err)
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid issue token request")
 	}
 
 	// Check tenant status
-	tenant, err := s.tenantRepo.GetByID(ctx, req.TenantID)
+	tenant, err := s.tenantRepo.FindByID(ctx, req.TenantID)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to get tenant", "tenant_id", req.TenantID, "error", err)
-		return nil, errors.ErrTenantNotFound.Wrap(err)
+		s.logger.Error(ctx, "Failed to get tenant", err, logger.String("tenant_id", req.TenantID))
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "failed to get tenant")
 	}
 
-	if tenant.Status != models.TenantStatusActive {
-		s.logger.Warn(ctx, "Tenant is not active", "tenant_id", req.TenantID, "status", tenant.Status)
-		return nil, errors.ErrTenantInactive
+	if tenant.Status != constants.TenantStatusActive {
+		s.logger.Warn(ctx, "Tenant is not active", logger.String("tenant_id", req.TenantID), logger.String("status", string(tenant.Status)))
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "tenant is not active", "")
 	}
 
 	// Check rate limit for agent
 	rateLimitKey := fmt.Sprintf("agent:%s:issue", req.AgentID)
-	allowed, err := s.rateLimitService.AllowRequest(ctx, rateLimitKey, 10, time.Minute)
+	allowed, _, _, err := s.rateLimitService.Allow(ctx, "agent", rateLimitKey, "issue")
 	if err != nil {
-		s.logger.Error(ctx, "Failed to check rate limit", "key", rateLimitKey, "error", err)
-		return nil, errors.ErrInternalServer.Wrap(err)
+		s.logger.Error(ctx, "Failed to check rate limit", err, logger.String("key", rateLimitKey))
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check rate limit")
 	}
 	if !allowed {
-		s.logger.Warn(ctx, "Rate limit exceeded for agent", "agent_id", req.AgentID)
-		return nil, errors.ErrRateLimitExceeded
+		s.logger.Warn(ctx, "Rate limit exceeded for agent", logger.String("agent_id", req.AgentID))
+		return nil, errors.New(errors.ErrCodeRateLimitExceeded, "rate limit exceeded for agent", "")
 	}
 
 	// Get device information
-	device, err := s.deviceRepo.GetByAgentID(ctx, req.AgentID)
+	device, err := s.deviceRepo.FindByID(ctx, req.AgentID)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to get device", "agent_id", req.AgentID, "error", err)
-		return nil, errors.ErrDeviceNotFound.Wrap(err)
+		s.logger.Error(ctx, "Failed to get device", err, logger.String("agent_id", req.AgentID))
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "failed to get device")
 	}
 
-	if device.Status != models.DeviceStatusActive {
-		s.logger.Warn(ctx, "Device is not active", "agent_id", req.AgentID, "status", device.Status)
-		return nil, errors.ErrDeviceInactive
+	if device.Status != constants.DeviceStatusActive {
+		s.logger.Warn(ctx, "Device is not active", logger.String("agent_id", req.AgentID), logger.String("status", string(device.Status)))
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "device is not active", "")
 	}
 
 	// Issue token pair using domain service
-	tokenPair, err := s.tokenService.IssueTokenPair(ctx, &domainService.TokenRequest{
-		TenantID:   req.TenantID,
-		AgentID:    req.AgentID,
-		Scope:      req.Scope,
-		DeviceInfo: device.DeviceFingerprint,
-		TrustLevel: device.TrustLevel,
-		IPAddress:  req.IPAddress,
-		UserAgent:  req.UserAgent,
-	})
+	refreshToken, accessToken, err := s.tokenService.IssueTokenPair(ctx, req.TenantID, req.AgentID, device.DeviceFingerprint, nil, nil)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to issue token pair", "agent_id", req.AgentID, "error", err)
+		s.logger.Error(ctx, "Failed to issue token pair", err, logger.String("agent_id", req.AgentID))
 		return nil, err
 	}
 
 	// Update device last seen time
 	device.LastSeenAt = time.Now()
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
-		s.logger.Warn(ctx, "Failed to update device last seen time", "agent_id", req.AgentID, "error", err)
+		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err), logger.String("agent_id", req.AgentID))
 		// Don't fail the request if last seen update fails
 	}
 
 	// Record audit log
 	s.logger.Info(ctx, "Token issuance successful",
-		"tenant_id", req.TenantID,
-		"agent_id", req.AgentID,
+		logger.String("tenant_id", req.TenantID),
+		logger.String("agent_id", req.AgentID),
 	)
 
 	return &dto.TokenResponse{
-		AccessToken:           tokenPair.AccessToken,
-		RefreshToken:          tokenPair.RefreshToken,
-		TokenType:             "Bearer",
-		ExpiresIn:             int(tokenPair.AccessTokenExpiresIn.Seconds()),
-		RefreshTokenExpiresIn: int(tokenPair.RefreshTokenExpiresIn.Seconds()),
-		Scope:                 tokenPair.Scope,
+		AccessToken:  accessToken.JTI,
+		RefreshToken: refreshToken.JTI,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(accessToken.TimeUntilExpiry().Seconds()),
+		Scope:        accessToken.Scope,
+		IssuedAt:     accessToken.IssuedAt.Unix(),
 	}, nil
 }
 
@@ -249,75 +235,69 @@ func (s *authAppServiceImpl) IssueToken(ctx context.Context, req *dto.IssueToken
 func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.TokenResponse, error) {
 	// Validate request
 	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid refresh token request", "error", err)
-		return nil, errors.ErrInvalidRequest.Wrap(err)
+		s.logger.Error(ctx, "Invalid refresh token request", err)
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid refresh token request")
 	}
 
 	// Verify old refresh token
-	claims, err := s.tokenService.VerifyToken(ctx, req.RefreshToken)
+	refreshToken, err := s.tokenService.VerifyToken(ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to verify refresh token", "error", err)
-		return nil, errors.ErrInvalidToken.Wrap(err)
-	}
-
-	// Verify token type
-	if claims.TokenType != models.TokenTypeRefresh {
-		s.logger.Warn(ctx, "Invalid token type for refresh", "token_type", claims.TokenType)
-		return nil, errors.ErrInvalidTokenType
+		s.logger.Error(ctx, "Failed to verify refresh token", err)
+		return nil, errors.Wrap(err, errors.FromConstants(constants.ErrCodeInvalidGrant), "failed to verify refresh token")
 	}
 
 	// Check rate limit for agent
-	rateLimitKey := fmt.Sprintf("agent:%s:refresh", claims.AgentID)
-	allowed, err := s.rateLimitService.AllowRequest(ctx, rateLimitKey, 10, time.Minute)
+	rateLimitKey := fmt.Sprintf("agent:%s:refresh", refreshToken.DeviceID)
+	allowed, _, _, err := s.rateLimitService.Allow(ctx, "agent", rateLimitKey, "refresh")
 	if err != nil {
-		s.logger.Error(ctx, "Failed to check rate limit", "key", rateLimitKey, "error", err)
-		return nil, errors.ErrInternalServer.Wrap(err)
+		s.logger.Error(ctx, "Failed to check rate limit", err, logger.String("key", rateLimitKey))
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check rate limit")
 	}
 	if !allowed {
-		s.logger.Warn(ctx, "Rate limit exceeded for agent", "agent_id", claims.AgentID)
-		return nil, errors.ErrRateLimitExceeded
+		s.logger.Warn(ctx, "Rate limit exceeded for agent", logger.String("agent_id", refreshToken.DeviceID))
+		return nil, errors.New(errors.ErrCodeRateLimitExceeded, "rate limit exceeded for agent", "")
 	}
 
 	// Check device validity
-	device, err := s.deviceRepo.GetByAgentID(ctx, claims.AgentID)
+	device, err := s.deviceRepo.FindByID(ctx, refreshToken.DeviceID)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to get device", "agent_id", claims.AgentID, "error", err)
-		return nil, errors.ErrDeviceNotFound.Wrap(err)
+		s.logger.Error(ctx, "Failed to get device", err, logger.String("agent_id", refreshToken.DeviceID))
+		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "failed to get device")
 	}
 
-	if device.Status != models.DeviceStatusActive {
-		s.logger.Warn(ctx, "Device is not active", "agent_id", claims.AgentID, "status", device.Status)
-		return nil, errors.ErrDeviceInactive
+	if device.Status != constants.DeviceStatusActive {
+		s.logger.Warn(ctx, "Device is not active", logger.String("agent_id", refreshToken.DeviceID), logger.String("status", string(device.Status)))
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "device is not active", "")
 	}
 
 	// Refresh token using domain service (one-time token mechanism)
-	newTokenPair, err := s.tokenService.RefreshToken(ctx, claims)
+	newRefreshToken, newAccessToken, err := s.tokenService.RefreshToken(ctx, req.RefreshToken, nil)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to refresh token", "agent_id", claims.AgentID, "error", err)
+		s.logger.Error(ctx, "Failed to refresh token", err, logger.String("agent_id", refreshToken.DeviceID))
 		return nil, err
 	}
 
 	// Update device last seen time
 	device.LastSeenAt = time.Now()
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
-		s.logger.Warn(ctx, "Failed to update device last seen time", "agent_id", claims.AgentID, "error", err)
+		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err), logger.String("agent_id", refreshToken.DeviceID))
 		// Don't fail the request if last seen update fails
 	}
 
 	// Record audit log
 	s.logger.Info(ctx, "Token refresh successful",
-		"tenant_id", claims.TenantID,
-		"agent_id", claims.AgentID,
-		"old_jti", claims.JTI,
+		logger.String("tenant_id", refreshToken.TenantID),
+		logger.String("agent_id", refreshToken.DeviceID),
+		logger.String("old_jti", refreshToken.JTI),
 	)
 
 	return &dto.TokenResponse{
-		AccessToken:           newTokenPair.AccessToken,
-		RefreshToken:          newTokenPair.RefreshToken,
-		TokenType:             "Bearer",
-		ExpiresIn:             int(newTokenPair.AccessTokenExpiresIn.Seconds()),
-		RefreshTokenExpiresIn: int(newTokenPair.RefreshTokenExpiresIn.Seconds()),
-		Scope:                 newTokenPair.Scope,
+		AccessToken:  newAccessToken.JTI,
+		RefreshToken: newRefreshToken.JTI,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(newAccessToken.TimeUntilExpiry().Seconds()),
+		Scope:        newAccessToken.Scope,
+		IssuedAt:     newAccessToken.IssuedAt.Unix(),
 	}, nil
 }
 
@@ -325,31 +305,31 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 func (s *authAppServiceImpl) RevokeToken(ctx context.Context, req *dto.RevokeTokenRequest) error {
 	// Validate request
 	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid revoke token request", "error", err)
-		return errors.ErrInvalidRequest.Wrap(err)
+		s.logger.Error(ctx, "Invalid revoke token request", err)
+		return errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid revoke token request")
 	}
 
 	// Verify token to get claims
-	claims, err := s.tokenService.VerifyToken(ctx, req.Token)
+	token, err := s.tokenService.VerifyToken(ctx, req.Token, constants.TokenType(req.TokenTypeHint), req.TenantID)
 	if err != nil {
 		// If token is invalid or expired, consider it already revoked
-		s.logger.Warn(ctx, "Token verification failed during revocation", "error", err)
+		s.logger.Warn(ctx, "Token verification failed during revocation", logger.Error(err))
 		return nil
 	}
 
 	// Revoke token using domain service
-	if err := s.tokenService.RevokeToken(ctx, claims); err != nil {
-		s.logger.Error(ctx, "Failed to revoke token", "jti", claims.JTI, "error", err)
+	if err := s.tokenService.RevokeToken(ctx, token.JTI, token.TenantID, req.Reason); err != nil {
+		s.logger.Error(ctx, "Failed to revoke token", err, logger.String("jti", token.JTI))
 		return err
 	}
 
 	// Record audit log
 	s.logger.Info(ctx, "Token revocation successful",
-		"tenant_id", claims.TenantID,
-		"agent_id", claims.AgentID,
-		"jti", claims.JTI,
-		"token_type", claims.TokenType,
-		"reason", req.Reason,
+		logger.String("tenant_id", token.TenantID),
+		logger.String("agent_id", token.DeviceID),
+		logger.String("jti", token.JTI),
+		logger.String("token_type", string(token.TokenType)),
+		logger.String("reason", req.Reason),
 	)
 
 	return nil
@@ -358,19 +338,19 @@ func (s *authAppServiceImpl) RevokeToken(ctx context.Context, req *dto.RevokeTok
 // IntrospectToken implements token introspection
 func (s *authAppServiceImpl) IntrospectToken(ctx context.Context, token string) (*dto.TokenIntrospectionResponse, error) {
 	// Verify token
-	claims, err := s.tokenService.VerifyToken(ctx, token)
+	t, err := s.tokenService.VerifyToken(ctx, token, "", "")
 	if err != nil {
-		s.logger.Error(ctx, "Failed to verify token during introspection", "error", err)
+		s.logger.Error(ctx, "Failed to verify token during introspection", err)
 		return &dto.TokenIntrospectionResponse{
 			Active: false,
 		}, nil
 	}
 
 	// Check if token is revoked
-	isRevoked, err := s.tokenService.IsTokenRevoked(ctx, claims.JTI)
+	isRevoked, err := s.tokenService.IsTokenRevoked(ctx, t.JTI)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to check token revocation status", "jti", claims.JTI, "error", err)
-		return nil, errors.ErrInternalServer.Wrap(err)
+		s.logger.Error(ctx, "Failed to check token revocation status", err, logger.String("jti", t.JTI))
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check token revocation status")
 	}
 
 	if isRevoked {
@@ -380,7 +360,7 @@ func (s *authAppServiceImpl) IntrospectToken(ctx context.Context, token string) 
 	}
 
 	// Check token expiration
-	if time.Now().After(time.Unix(claims.ExpiresAt, 0)) {
+	if t.IsExpired() {
 		return &dto.TokenIntrospectionResponse{
 			Active: false,
 		}, nil
@@ -388,18 +368,13 @@ func (s *authAppServiceImpl) IntrospectToken(ctx context.Context, token string) 
 
 	// Token is valid and active
 	return &dto.TokenIntrospectionResponse{
-		Active:           true,
-		Scope:            claims.Scope,
-		ClientID:         claims.AgentID,
-		TenantID:         claims.TenantID,
-		ExpiresAt:        claims.ExpiresAt,
-		IssuedAt:         claims.IssuedAt,
-		Subject:          claims.Subject,
-		JTI:              claims.JTI,
-		TokenType:        string(claims.TokenType),
-		DeviceTrustLevel: string(claims.DeviceTrustLevel),
+		Active:    true,
+		Scope:     t.Scope,
+		ClientID:  t.DeviceID,
+		TenantID:  t.TenantID,
+		Exp:       t.ExpiresAt.Unix(),
+		Iat:       t.IssuedAt.Unix(),
+		Jti:       t.JTI,
+		TokenType: string(t.TokenType),
 	}, nil
 }
-
-//Personal.AI order the ending
-

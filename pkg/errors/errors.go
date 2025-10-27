@@ -6,7 +6,33 @@ import (
 	"fmt"
 	"net/http"
 
-	"cbc/pkg/constants"
+	"github.com/turtacn/cbc/pkg/constants"
+)
+
+// AppError represents a structured application error
+type AppError struct {
+	Code        string
+	Message     string
+	Description string
+	Details     map[string]string
+}
+
+func (e *AppError) Error() string {
+	return e.Message
+}
+
+var ErrDatabaseOperation = NewError(constants.ErrorCode(ErrCodeInternal), 500, "database operation failed", "database operation failed")
+
+const (
+	ErrCodeInternal           = "internal_error"
+	ErrCodeInvalidRequest     = "invalid_request"
+	ErrCodeUnauthorized       = "unauthorized"
+	ErrCodeForbidden          = "forbidden"
+	ErrCodeNotFound           = "not_found"
+	ErrCodeRateLimitExceeded  = "rate_limit_exceeded"
+	ErrCodeServiceUnavailable = "service_unavailable"
+	ErrCodeConflict           = "conflict"
+	CodeUnauthenticated       = "unauthenticated"
 )
 
 // ================================================================================
@@ -217,6 +243,16 @@ func ErrTokenRevoked(tokenType string, jti string) CBCError {
 		WithMetadata("jti", jti)
 }
 
+// ErrTokenNotFound creates a token not found error
+func ErrTokenNotFound(jti string) CBCError {
+	return NewError(
+		constants.ErrCodeInvalidGrant,
+		http.StatusBadRequest,
+		"Token not found",
+		fmt.Sprintf("Token with JTI %s not found", jti),
+	).WithMetadata("jti", jti)
+}
+
 // ErrTokenMalformed creates a token malformed error
 func ErrTokenMalformed(reason string) CBCError {
 	return ErrInvalidRequest(fmt.Sprintf("Token is malformed: %s", reason)).
@@ -256,6 +292,12 @@ func ErrMgrClientAssertionInvalid(reason string) CBCError {
 func ErrAgentNotFound(agentID string) CBCError {
 	return ErrInvalidGrant(fmt.Sprintf("Agent not found: %s", agentID)).
 		WithMetadata("agent_id", agentID)
+}
+
+// ErrDeviceNotFound creates a device not found error
+func ErrDeviceNotFound(deviceID string) CBCError {
+	return ErrInvalidGrant(fmt.Sprintf("Device not found: %s", deviceID)).
+		WithMetadata("device_id", deviceID)
 }
 
 // ErrDeviceUntrusted creates a device untrusted error
@@ -524,6 +566,14 @@ func ShouldLogError(err error) bool {
 		return status >= 500 || status == http.StatusTooManyRequests
 	}
 	return true
+}
+
+// IsNotFoundError checks if an error is a not found error.
+func IsNotFoundError(err error) bool {
+	if cbcErr, ok := AsCBCError(err); ok {
+		return cbcErr.Code() == "not_found"
+	}
+	return false
 }
 
 //Personal.AI order the ending

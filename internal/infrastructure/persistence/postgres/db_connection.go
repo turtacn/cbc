@@ -34,15 +34,15 @@ type DBConnection struct {
 //   - error: Connection establishment error if any
 func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger.Logger) (*DBConnection, error) {
 	if cfg == nil {
-		return nil, errors.ErrInvalidConfig
+		return nil, errors.New(errors.CodeInvalidArgument, "database config is required")
 	}
 
-	log.Info("Initializing PostgreSQL connection pool",
-		"host", cfg.Host,
-		"port", cfg.Port,
-		"database", cfg.Database,
-		"max_conns", cfg.MaxConns,
-		"min_conns", cfg.MinConns,
+	log.Info(ctx, "Initializing PostgreSQL connection pool",
+		logger.String("host", cfg.Host),
+		logger.Int("port", int(cfg.Port)),
+		logger.String("database", cfg.Database),
+		logger.Int("max_conns", int(cfg.MaxConns)),
+		logger.Int("min_conns", int(cfg.MinConns)),
 	)
 
 	// Construct PostgreSQL connection string
@@ -59,8 +59,8 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 	// Parse connection configuration
 	poolConfig, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		log.Error("Failed to parse database connection string", "error", err)
-		return nil, fmt.Errorf("%w: %v", errors.ErrDatabaseConnection, err)
+		log.Error(ctx, "Failed to parse database connection string", err)
+		return nil, errors.New(errors.CodeInternal, "failed to parse database connection string")
 	}
 
 	// Configure connection pool parameters
@@ -77,8 +77,8 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 	// Create connection pool
 	pool, err := pgxpool.NewWithConfig(connectCtx, poolConfig)
 	if err != nil {
-		log.Error("Failed to create database connection pool", "error", err)
-		return nil, fmt.Errorf("%w: %v", errors.ErrDatabaseConnection, err)
+		log.Error(ctx, "Failed to create database connection pool", err)
+		return nil, errors.New(errors.CodeInternal, "failed to create database connection pool")
 	}
 
 	dbConn := &DBConnection{
@@ -93,9 +93,9 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 		return nil, err
 	}
 
-	log.Info("PostgreSQL connection pool initialized successfully",
-		"total_conns", pool.Stat().TotalConns(),
-		"idle_conns", pool.Stat().IdleConns(),
+	log.Info(ctx, "PostgreSQL connection pool initialized successfully",
+		logger.Int("total_conns", int(pool.Stat().TotalConns())),
+		logger.Int("idle_conns", int(pool.Stat().IdleConns())),
 	)
 
 	return dbConn, nil
@@ -124,18 +124,18 @@ func (db *DBConnection) Ping(ctx context.Context) error {
 
 	startTime := time.Now()
 	if err := db.pool.Ping(pingCtx); err != nil {
-		db.logger.Error("Database ping failed", "error", err)
-		return fmt.Errorf("%w: %v", errors.ErrDatabaseConnection, err)
+		db.logger.Error(ctx, "Database ping failed", err)
+		return errors.New(errors.CodeInternal, "database ping failed")
 	}
 
 	latency := time.Since(startTime)
-	db.logger.Debug("Database ping successful", "latency_ms", latency.Milliseconds())
+	db.logger.Debug(ctx, "Database ping successful", logger.Int64("latency_ms", latency.Milliseconds()))
 
 	// Warn if latency is high (> 100ms)
 	if latency > 100*time.Millisecond {
-		db.logger.Warn("High database latency detected",
-			"latency_ms", latency.Milliseconds(),
-			"threshold_ms", 100,
+		db.logger.Warn(ctx, "High database latency detected",
+			logger.Int64("latency_ms", latency.Milliseconds()),
+			logger.Int("threshold_ms", 100),
 		)
 	}
 
@@ -172,9 +172,9 @@ func (db *DBConnection) HealthCheck(ctx context.Context) (map[string]interface{}
 
 	// Check for potential issues
 	if stats.IdleConns() == 0 && stats.TotalConns() >= int32(db.config.MaxConns) {
-		db.logger.Warn("Connection pool exhausted",
-			"total_conns", stats.TotalConns(),
-			"max_conns", db.config.MaxConns,
+		db.logger.Warn(ctx, "Connection pool exhausted",
+			logger.Int32("total_conns", stats.TotalConns()),
+			logger.Int32("max_conns", db.config.MaxConns),
 		)
 		healthInfo["warning"] = "connection_pool_near_limit"
 	}
@@ -186,14 +186,14 @@ func (db *DBConnection) HealthCheck(ctx context.Context) (map[string]interface{}
 // It waits for active connections to complete before closing.
 // This method should be called during application shutdown.
 func (db *DBConnection) Close() {
-	db.logger.Info("Closing PostgreSQL connection pool",
-		"total_conns", db.pool.Stat().TotalConns(),
-		"acquired_conns", db.pool.Stat().AcquiredConns(),
+	db.logger.Info(context.Background(), "Closing PostgreSQL connection pool",
+		logger.Int("total_conns", int(db.pool.Stat().TotalConns())),
+		logger.Int("acquired_conns", int(db.pool.Stat().AcquiredConns())),
 	)
 
 	db.pool.Close()
 
-	db.logger.Info("PostgreSQL connection pool closed successfully")
+	db.logger.Info(context.Background(), "PostgreSQL connection pool closed successfully")
 }
 
 // Stats returns current connection pool statistics.

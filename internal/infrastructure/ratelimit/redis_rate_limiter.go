@@ -137,7 +137,7 @@ func NewRedisRateLimiter(
 	log logger.Logger,
 ) (*RedisRateLimiter, error) {
 	if client == nil {
-		return nil, errors.New(errors.CodeInvalidArgument, "redis client is required")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "redis client is required", "")
 	}
 
 	if config == nil {
@@ -158,10 +158,10 @@ func NewRedisRateLimiter(
 		})
 	}
 
-	log.Info("Redis rate limiter initialized",
-		"default_limit", config.DefaultLimit,
-		"default_window", config.DefaultWindow,
-		"local_fallback", config.EnableLocalFallback,
+	log.Info(context.Background(), "Redis rate limiter initialized",
+		logger.Int64("default_limit", config.DefaultLimit),
+		logger.Duration("default_window", config.DefaultWindow),
+		logger.Bool("local_fallback", config.EnableLocalFallback),
 	)
 
 	return rl, nil
@@ -170,7 +170,7 @@ func NewRedisRateLimiter(
 // DefaultRateLimiterConfig returns default rate limiter configuration.
 func DefaultRateLimiterConfig() *RateLimiterConfig {
 	return &RateLimiterConfig{
-		DefaultLimit:        int64(constants.DefaultRateLimitPerMinute),
+		DefaultLimit:        100,
 		DefaultWindow:       time.Minute,
 		EnableLocalFallback: true,
 		KeyPrefix:           "ratelimit",
@@ -218,7 +218,7 @@ func (rl *RedisRateLimiter) Allow(
 		if rl.config.EnableLocalFallback {
 			return rl.allowLocal(key, limit, rate)
 		}
-		return nil, errors.Wrap(err, errors.CodeInternal, "rate limit check failed")
+		return nil, errors.New(errors.CodeInternal, "rate limit check failed", err.Error())
 	}
 
 	return result, nil
@@ -261,7 +261,7 @@ func (rl *RedisRateLimiter) AllowN(
 		if rl.config.EnableLocalFallback {
 			return rl.allowLocalN(key, limit, rate, n)
 		}
-		return nil, errors.Wrap(err, errors.CodeInternal, "rate limit check failed")
+		return nil, errors.New(errors.CodeInternal, "rate limit check failed", err.Error())
 	}
 
 	return result, nil
@@ -285,7 +285,7 @@ func (rl *RedisRateLimiter) ResetLimit(
 
 	err := rl.client.Del(ctx, key).Err()
 	if err != nil && err != redis.Nil {
-		return errors.Wrap(err, errors.CodeInternal, "failed to reset rate limit")
+		return errors.New(errors.CodeInternal, "failed to reset rate limit", err.Error())
 	}
 
 	// Also reset local bucket if exists
@@ -293,10 +293,10 @@ func (rl *RedisRateLimiter) ResetLimit(
 		rl.localBuckets.Remove(key)
 	}
 
-	rl.logger.Debug("Rate limit reset",
-		"dimension", dimension,
-		"identifier", identifier,
-		"key", key,
+	rl.logger.Debug(ctx, "Rate limit reset",
+		logger.String("dimension", string(dimension)),
+		logger.String("identifier", identifier),
+		logger.String("key", key),
 	)
 
 	return nil
@@ -328,7 +328,7 @@ func (rl *RedisRateLimiter) GetCurrentUsage(
 	// Get current state from Redis
 	values, err := rl.client.HMGet(ctx, key, "tokens", "last_refill").Result()
 	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeInternal, "failed to get usage")
+		return nil, errors.New(errors.CodeInternal, "failed to get usage", err.Error())
 	}
 
 	// Parse values
@@ -550,7 +550,7 @@ func (rl *RedisRateLimiter) CleanupLocalBuckets(maxIdle time.Duration) int {
 
 	removed := rl.localBuckets.Cleanup(maxIdle)
 	if removed > 0 {
-		rl.logger.Debug("Cleaned up idle buckets", "count", removed)
+		rl.logger.Debug(context.Background(), "Cleaned up idle buckets", logger.Int("count", removed))
 	}
 
 	return removed
@@ -562,7 +562,7 @@ func (rl *RedisRateLimiter) Close() error {
 		rl.localBuckets.Clear()
 	}
 
-	rl.logger.Info("Redis rate limiter closed")
+	rl.logger.Info(context.Background(), "Redis rate limiter closed")
 	return nil
 }
 

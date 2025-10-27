@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/constants"
 )
 
 // DeviceRepository 定义设备仓储接口
@@ -90,7 +91,7 @@ type DeviceRepository interface {
 	//   - trustLevel: 新的信任等级
 	// 返回：
 	//   - error: 更新失败时返回错误
-	UpdateTrustLevel(ctx context.Context, agentID string, trustLevel models.TrustLevel) error
+	UpdateTrustLevel(ctx context.Context, agentID string, trustLevel constants.TrustLevel) error
 
 	// UpdateStatus 更新设备状态
 	// 参数：
@@ -99,7 +100,7 @@ type DeviceRepository interface {
 	//   - status: 新的设备状态
 	// 返回：
 	//   - error: 更新失败时返回错误
-	UpdateStatus(ctx context.Context, agentID string, status models.DeviceStatus) error
+	UpdateStatus(ctx context.Context, agentID string, status constants.DeviceStatus) error
 
 	// Delete 删除设备（软删除）
 	// 该方法不会物理删除设备记录，而是标记为 deleted 状态
@@ -155,7 +156,7 @@ type DeviceRepository interface {
 	//   - []*models.Device: 设备切片
 	//   - int64: 总记录数
 	//   - error: 查询失败时返回错误
-	FindByTrustLevel(ctx context.Context, tenantID string, trustLevel models.TrustLevel, limit, offset int) ([]*models.Device, int64, error)
+	FindByTrustLevel(ctx context.Context, tenantID string, trustLevel constants.TrustLevel, limit, offset int) ([]*models.Device, int64, error)
 
 	// BatchUpdateLastSeen 批量更新设备的最后活跃时间
 	// 用于性能优化场景（如批量设备心跳上报）
@@ -179,26 +180,26 @@ type DeviceRepository interface {
 
 // DeviceMetrics 设备统计指标
 type DeviceMetrics struct {
-	TotalDevices        int64                         // 设备总数
-	ActiveDevices       int64                         // 活跃设备数（24 小时内）
-	InactiveDevices     int64                         // 未活跃设备数（> 30 天）
-	ByStatus            map[models.DeviceStatus]int64 // 按状态统计
-	ByTrustLevel        map[models.TrustLevel]int64   // 按信任等级统计
-	NewDevicesToday     int64                         // 今日新增设备数
-	NewDevicesThisWeek  int64                         // 本周新增设备数
-	NewDevicesThisMonth int64                         // 本月新增设备数
+	TotalDevices        int64                           // 设备总数
+	ActiveDevices       int64                           // 活跃设备数（24 小时内）
+	InactiveDevices     int64                           // 未活跃设备数（> 30 天）
+	ByStatus            map[constants.DeviceStatus]int64 // 按状态统计
+	ByTrustLevel        map[constants.TrustLevel]int64   // 按信任等级统计
+	NewDevicesToday     int64                           // 今日新增设备数
+	NewDevicesThisWeek  int64                           // 本周新增设备数
+	NewDevicesThisMonth int64                           // 本月新增设备数
 }
 
 // DeviceQuery 设备查询参数
 // 用于复杂查询场景（如管理端的设备列表筛选）
 type DeviceQuery struct {
-	TenantID       string              // 租户 ID（必填）
-	AgentID        string              // Agent ID（可选，模糊匹配）
-	Status         models.DeviceStatus // 设备状态（可选）
-	TrustLevel     models.TrustLevel   // 信任等级（可选）
-	Platform       string              // 平台类型（可选）
-	LastSeenAfter  *time.Time          // 最后活跃时间下界（可选）
-	LastSeenBefore *time.Time          // 最后活跃时间上界（可选）
+	TenantID       string                // 租户 ID（必填）
+	AgentID        string                // Agent ID（可选，模糊匹配）
+	Status         constants.DeviceStatus // 设备状态（可选）
+	TrustLevel     constants.TrustLevel   // 信任等级（可选）
+	Platform       string                // 平台类型（可选）
+	LastSeenAfter  *time.Time            // 最后活跃时间下界（可选）
+	LastSeenBefore *time.Time            // 最后活跃时间上界（可选）
 	CreatedAfter   *time.Time          // 创建时间下界（可选）
 	CreatedBefore  *time.Time          // 创建时间上界（可选）
 	Limit          int                 // 每页数量（默认 100，最大 1000）

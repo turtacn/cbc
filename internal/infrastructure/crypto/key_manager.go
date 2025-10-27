@@ -18,7 +18,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
-	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
 )
@@ -79,6 +78,13 @@ type KeyMetadata struct {
 	Status    KeyStatus
 	CreatedAt time.Time
 	ExpiresAt time.Time
+}
+
+// KeyManagementService defines the interface for key management operations.
+type KeyManagementService interface {
+	GetActiveKeyForTenant(ctx context.Context, tenantID string) (*KeyPair, error)
+	GetKeyPair(ctx context.Context, keyID string) (*KeyPair, error)
+	ListTenantKeys(ctx context.Context, tenantID string) ([]*KeyMetadata, error)
 }
 
 // KeyManager manages cryptographic keys with caching and rotation.
@@ -168,10 +174,10 @@ keyCache:      keyCache,
 metadataCache: metadataCache,
 }
 
-log.Info("Key manager initialized",
-"cache_size", config.CacheSize,
-"cache_ttl", config.CacheTTL,
-"grace_period", config.GracePeriod,
+log.Info(context.Background(), "Key manager initialized",
+	logger.Int("cache_size", config.CacheSize),
+	logger.Duration("cache_ttl", config.CacheTTL),
+	logger.Duration("grace_period", config.GracePeriod),
 )
 
 return km, nil
@@ -239,17 +245,17 @@ func (km *KeyManager) GenerateKeyPair(ctx context.Context, tenantID string, algo
 
 	// Index by tenant for quick lookup
 	if err := km.indexKeyByTenant(ctx, tenantID, keyID); err != nil {
-		km.logger.Warn("Failed to index key by tenant",
-			"tenant_id", tenantID,
-			"key_id", keyID,
-			"error", err,
+		km.logger.Warn(ctx, "Failed to index key by tenant",
+			logger.String("tenant_id", tenantID),
+			logger.String("key_id", keyID),
+			logger.Error(err),
 		)
 	}
 
-	km.logger.Info("Key pair generated",
-		"key_id", keyID,
-		"tenant_id", tenantID,
-		"algorithm", algorithm,
+	km.logger.Info(ctx, "Key pair generated",
+		logger.String("key_id", keyID),
+		logger.String("tenant_id", tenantID),
+		logger.String("algorithm", string(algorithm)),
 	)
 
 	return keyPair, nil
@@ -423,9 +429,9 @@ func (km *KeyManager) GetActiveKeyForTenant(ctx context.Context, tenantID string
 	for _, keyID := range keyIDs {
 		keyPair, err := km.GetKeyPair(ctx, keyID)
 		if err != nil {
-			km.logger.Warn("Failed to load key",
-				"key_id", keyID,
-				"error", err,
+			km.logger.Warn(ctx, "Failed to load key",
+				logger.String("key_id", keyID),
+				logger.Error(err),
 			)
 			continue
 		}
@@ -456,7 +462,7 @@ func (km *KeyManager) RotateKey(ctx context.Context, tenantID string, oldKeyID s
 	}
 
 	if oldKey.TenantID != tenantID {
-		return nil, errors.New(errors.CodePermissionDenied, "key does not belong to tenant")
+		return nil, errors.New(errors.CodePermissionDenied, "key does not belong to tenant", nil)
 	}
 
 	// Generate new key with same algorithm
@@ -473,20 +479,19 @@ func (km *KeyManager) RotateKey(ctx context.Context, tenantID string, oldKeyID s
 
 	// Update old key in Vault
 	if err := km.storeKeyPairInVault(ctx, oldKey); err != nil {
-		km.logger.Error("Failed to update deprecated key",
-			"key_id", oldKeyID,
-			"error", err,
+		km.logger.Error(ctx, "Failed to update deprecated key", err,
+			logger.String("key_id", oldKeyID),
 		)
 	}
 
 	// Update cache
 	km.cacheKeyPair(oldKey)
 
-	km.logger.Info("Key rotated",
-		"old_key_id", oldKeyID,
-		"new_key_id", newKey.ID,
-		"tenant_id", tenantID,
-		"grace_period", km.config.GracePeriod,
+	km.logger.Info(ctx, "Key rotated",
+		logger.String("old_key_id", oldKeyID),
+		logger.String("new_key_id", newKey.ID),
+		logger.String("tenant_id", tenantID),
+		logger.Duration("grace_period", km.config.GracePeriod),
 	)
 
 	return newKey, nil
@@ -511,9 +516,9 @@ func (km *KeyManager) ListTenantKeys(ctx context.Context, tenantID string) ([]*K
 	for _, keyID := range keyIDs {
 		keyPair, err := km.GetKeyPair(ctx, keyID)
 		if err != nil {
-			km.logger.Warn("Failed to load key metadata",
-				"key_id", keyID,
-				"error", err,
+			km.logger.Warn(ctx, "Failed to load key metadata",
+				logger.String("key_id", keyID),
+				logger.Error(err),
 			)
 			continue
 		}
@@ -544,11 +549,11 @@ func (km *KeyManager) CleanupExpiredKeys(ctx context.Context) (int, error) {
 	// In production, you would iterate through all keys
 	count := 0
 
-	km.logger.Info("Starting expired key cleanup")
+	km.logger.Info(ctx, "Starting expired key cleanup")
 
 	// Implementation would scan Vault and remove expired keys
 	// For now, just log the operation
-	km.logger.Info("Expired key cleanup completed", "count", count)
+	km.logger.Info(ctx, "Expired key cleanup completed", logger.Int("count", count))
 
 	return count, nil
 }
@@ -643,9 +648,9 @@ func (km *KeyManager) cacheKeyPair(keyPair *KeyPair) {
 
 	// Cache in Redis if available
 	if km.cacheManager != nil {
-		cacheKey := fmt.Sprintf("%s:key:%s", constants.CachePrefixKey, keyPair.ID)
+		cacheKey := fmt.Sprintf("key:%s", keyPair.ID)
 		data, _ := json.Marshal(keyPair)
-		_ = km.cacheManager.Set(context.Background(), cacheKey, string(data), km.config.CacheTTL)
+		_ = km.cacheManager.Set(context.Background(), cacheKey, string(data), &redis.CacheOptions{TTL: km.config.CacheTTL})
 	}
 }
 
@@ -661,14 +666,12 @@ func (km *KeyManager) getKeyPairFromCache(keyID string) *KeyPair {
 
 	// Check Redis cache if available
 	if km.cacheManager != nil {
-		cacheKey := fmt.Sprintf("%s:key:%s", constants.CachePrefixKey, keyID)
-		if data, err := km.cacheManager.Get(context.Background(), cacheKey); err == nil {
-			var keyPair KeyPair
-			if json.Unmarshal([]byte(data), &keyPair) == nil {
-				// Update memory cache
-				km.keyCache.Add(keyID, &keyPair)
-				return &keyPair
-			}
+		cacheKey := fmt.Sprintf("key:%s", keyID)
+		var keyPair KeyPair
+		if ok, err := km.cacheManager.Get(context.Background(), cacheKey, &keyPair, nil); err == nil && ok {
+			// Update memory cache
+			km.keyCache.Add(keyID, &keyPair)
+			return &keyPair
 		}
 	}
 
@@ -681,7 +684,7 @@ func (km *KeyManager) indexKeyByTenant(ctx context.Context, tenantID, keyID stri
 		return nil
 	}
 
-	indexKey := fmt.Sprintf("%s:tenant-keys:%s", constants.CachePrefixKey, tenantID)
+	indexKey := fmt.Sprintf("tenant-keys:%s", tenantID)
 
 	// Get existing key IDs
 	keyIDs, _ := km.getTenantKeyIDs(ctx, tenantID)
@@ -695,7 +698,7 @@ func (km *KeyManager) indexKeyByTenant(ctx context.Context, tenantID, keyID stri
 		return err
 	}
 
-	return km.cacheManager.Set(ctx, indexKey, string(data), 0) // No expiration for index
+	return km.cacheManager.Set(ctx, indexKey, string(data), nil) // No expiration for index
 }
 
 // getTenantKeyIDs retrieves all key IDs for a tenant.
@@ -704,10 +707,11 @@ func (km *KeyManager) getTenantKeyIDs(ctx context.Context, tenantID string) ([]s
 		return []string{}, nil
 	}
 
-	indexKey := fmt.Sprintf("%s:tenant-keys:%s", constants.CachePrefixKey, tenantID)
+	indexKey := fmt.Sprintf("tenant-keys:%s", tenantID)
 
-	data, err := km.cacheManager.Get(ctx, indexKey)
-	if err != nil {
+	var data string
+	ok, err := km.cacheManager.Get(ctx, indexKey, &data, nil)
+	if err != nil || !ok {
 		return []string{}, nil
 	}
 
@@ -732,21 +736,21 @@ func (km *KeyManager) InvalidateCache(keyID string) {
 		km.metadataCache.Remove(keyID)
 
 		if km.cacheManager != nil {
-			cacheKey := fmt.Sprintf("%s:key:%s", constants.CachePrefixKey, keyID)
-			_ = km.cacheManager.Delete(context.Background(), cacheKey)
+			cacheKey := fmt.Sprintf("key:%s", keyID)
+			_ = km.cacheManager.Delete(context.Background(), cacheKey, nil)
 		}
 	} else {
 		km.keyCache.Purge()
 		km.metadataCache.Purge()
 	}
 
-	km.logger.Debug("Cache invalidated", "key_id", keyID)
+	km.logger.Debug(context.Background(), "Cache invalidated", logger.String("key_id", keyID))
 }
 
 // Close closes the key manager and releases resources.
 func (km *KeyManager) Close() error {
 	km.InvalidateCache("")
-	km.logger.Info("Key manager closed")
+	km.logger.Info(context.Background(), "Key manager closed")
 	return nil
 }
 

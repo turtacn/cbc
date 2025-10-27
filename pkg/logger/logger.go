@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"cbc/pkg/constants"
+	"github.com/turtacn/cbc/pkg/constants"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -77,6 +77,11 @@ func Int(key string, value int) Field {
 
 // Int64 creates an int64 field
 func Int64(key string, value int64) Field {
+	return Field{Key: key, Value: value}
+}
+
+// Int32 creates an int32 field
+func Int32(key string, value int32) Field {
 	return Field{Key: key, Value: value}
 }
 
@@ -571,8 +576,8 @@ func Warn(ctx context.Context, message string, fields ...Field) {
 	globalLogger.Warn(ctx, message, fields...)
 }
 
-// Error logs an error message using the global logger
-func Error(ctx context.Context, message string, err error, fields ...Field) {
+// Errorw logs an error message using the global logger
+func Errorw(ctx context.Context, message string, err error, fields ...Field) {
 	globalLogger.Error(ctx, message, err, fields...)
 }
 

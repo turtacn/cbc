@@ -284,7 +284,7 @@ func (m *Metrics) RecordVaultAPI(operation string, duration time.Duration, err e
 	m.VaultAPILatency.WithLabelValues(operation).Observe(duration.Seconds())
 
 	if err != nil {
-		m.VaultAPIErrors.WithLabelValues(operation, constants.ErrorTypeVaultAPI).Inc()
+		m.VaultAPIErrors.WithLabelValues(operation, string(constants.ErrorTypeVaultAPI)).Inc()
 	}
 }
 
