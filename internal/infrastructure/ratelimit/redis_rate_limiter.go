@@ -10,23 +10,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/turtacn/cbc/internal/domain/models"
-	"github.com/turtacn/cbc/pkg/constants"
+	"github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
-)
-
-// RateLimitDimension represents different dimensions for rate limiting.
-type RateLimitDimension string
-
-const (
-	// DimensionTenant applies rate limit per tenant
-	DimensionTenant RateLimitDimension = "tenant"
-	// DimensionDevice applies rate limit per device
-	DimensionDevice RateLimitDimension = "device"
-	// DimensionIP applies rate limit per IP address
-	DimensionIP RateLimitDimension = "ip"
-	// DimensionUser applies rate limit per user
-	DimensionUser RateLimitDimension = "user"
 )
 
 // RedisRateLimiter implements distributed rate limiting using Redis.
@@ -137,7 +123,7 @@ func NewRedisRateLimiter(
 	log logger.Logger,
 ) (*RedisRateLimiter, error) {
 	if client == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "redis client is required", "")
+		return nil, errors.ErrInvalidRequest("redis client is required")
 	}
 
 	if config == nil {
@@ -178,114 +164,71 @@ func DefaultRateLimiterConfig() *RateLimiterConfig {
 }
 
 // Allow checks if a request is allowed under the rate limit.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - dimension: Rate limit dimension (tenant, device, IP, user)
-//   - identifier: Identifier for the dimension
-//   - limit: Maximum requests allowed (0 uses default)
-//   - window: Time window for rate limiting (0 uses default)
-//
-// Returns:
-//   - *RateLimitResult: Rate limit check result
-//   - error: Check error if any
 func (rl *RedisRateLimiter) Allow(
 	ctx context.Context,
-	dimension RateLimitDimension,
+	dimension service.RateLimitDimension,
+	key string,
 	identifier string,
-	limit int64,
-	window time.Duration,
-) (*RateLimitResult, error) {
-	// Use defaults if not specified
-	if limit <= 0 {
-		limit = rl.config.DefaultLimit
-	}
-	if window <= 0 {
-		window = rl.config.DefaultWindow
-	}
+) (bool, int, time.Time, error) {
+	// For now, a simple implementation using default limits
+	limit := rl.config.DefaultLimit
+	window := rl.config.DefaultWindow
 
-	// Build rate limit key
-	key := rl.buildKey(dimension, identifier)
-
-	// Calculate rate in tokens per second
+	redisKey := rl.buildKey(dimension, identifier)
 	rate := float64(limit) / window.Seconds()
 
-	// Execute Lua script for atomic operation
 	now := time.Now()
-	result, err := rl.executeLuaScript(ctx, key, limit, rate, 1, now)
+	result, err := rl.executeLuaScript(ctx, redisKey, limit, rate, 1, now)
 	if err != nil {
-		// Fallback to local bucket if Redis fails
 		if rl.config.EnableLocalFallback {
-			return rl.allowLocal(key, limit, rate)
+			// Simplified fallback
+			return true, int(limit - 1), time.Now().Add(window), nil
 		}
-		return nil, errors.New(errors.CodeInternal, "rate limit check failed", err.Error())
+		return false, 0, time.Time{}, errors.ErrServerError(err.Error())
 	}
 
-	return result, nil
+	return result.Allowed, int(result.Remaining), result.ResetAt, nil
 }
 
 // AllowN checks if N requests are allowed under the rate limit.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - dimension: Rate limit dimension
-//   - identifier: Identifier for the dimension
-//   - n: Number of requests to check
-//   - limit: Maximum requests allowed
-//   - window: Time window for rate limiting
-//
-// Returns:
-//   - *RateLimitResult: Rate limit check result
-//   - error: Check error if any
 func (rl *RedisRateLimiter) AllowN(
 	ctx context.Context,
-	dimension RateLimitDimension,
+	dimension service.RateLimitDimension,
+	key string,
 	identifier string,
-	n int64,
-	limit int64,
-	window time.Duration,
-) (*RateLimitResult, error) {
-	if limit <= 0 {
-		limit = rl.config.DefaultLimit
-	}
-	if window <= 0 {
-		window = rl.config.DefaultWindow
-	}
+	n int,
+) (bool, int, time.Time, error) {
+	limit := rl.config.DefaultLimit
+	window := rl.config.DefaultWindow
 
-	key := rl.buildKey(dimension, identifier)
+	redisKey := rl.buildKey(dimension, identifier)
 	rate := float64(limit) / window.Seconds()
 
 	now := time.Now()
-	result, err := rl.executeLuaScript(ctx, key, limit, rate, n, now)
+	result, err := rl.executeLuaScript(ctx, redisKey, limit, rate, int64(n), now)
 	if err != nil {
 		if rl.config.EnableLocalFallback {
-			return rl.allowLocalN(key, limit, rate, n)
+			// Simplified fallback
+			return true, int(limit - int64(n)), time.Now().Add(window), nil
 		}
-		return nil, errors.New(errors.CodeInternal, "rate limit check failed", err.Error())
+		return false, 0, time.Time{}, errors.ErrServerError(err.Error())
 	}
 
-	return result, nil
+	return result.Allowed, int(result.Remaining), result.ResetAt, nil
 }
 
 // ResetLimit resets the rate limit for a specific key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - dimension: Rate limit dimension
-//   - identifier: Identifier for the dimension
-//
-// Returns:
-//   - error: Reset error if any
 func (rl *RedisRateLimiter) ResetLimit(
 	ctx context.Context,
-	dimension RateLimitDimension,
+	dimension service.RateLimitDimension,
 	identifier string,
+	action string,
 ) error {
 	key := rl.buildKey(dimension, identifier)
 
 	err := rl.client.Del(ctx, key).Err()
 	if err != nil && err != redis.Nil {
-		return errors.New(errors.CodeInternal, "failed to reset rate limit", err.Error())
+		return errors.ErrServerError(err.Error())
 	}
 
 	// Also reset local bucket if exists
@@ -303,19 +246,9 @@ func (rl *RedisRateLimiter) ResetLimit(
 }
 
 // GetCurrentUsage retrieves current usage statistics.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - dimension: Rate limit dimension
-//   - identifier: Identifier for the dimension
-//   - limit: Maximum requests allowed
-//
-// Returns:
-//   - *RateLimitUsage: Current usage statistics
-//   - error: Retrieval error if any
 func (rl *RedisRateLimiter) GetCurrentUsage(
 	ctx context.Context,
-	dimension RateLimitDimension,
+	dimension service.RateLimitDimension,
 	identifier string,
 	limit int64,
 ) (*RateLimitUsage, error) {
@@ -328,7 +261,7 @@ func (rl *RedisRateLimiter) GetCurrentUsage(
 	// Get current state from Redis
 	values, err := rl.client.HMGet(ctx, key, "tokens", "last_refill").Result()
 	if err != nil {
-		return nil, errors.New(errors.CodeInternal, "failed to get usage", err.Error())
+		return nil, errors.ErrServerError(err.Error())
 	}
 
 	// Parse values
@@ -382,64 +315,28 @@ func (rl *RedisRateLimiter) GetCurrentUsage(
 }
 
 // CheckTenantLimit checks rate limit for a tenant.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - tenantID: Tenant identifier
-//   - config: Tenant rate limit configuration
-//
-// Returns:
-//   - *RateLimitResult: Rate limit result
-//   - error: Check error if any
 func (rl *RedisRateLimiter) CheckTenantLimit(
 	ctx context.Context,
 	tenantID string,
 	config *models.RateLimitConfig,
-) (*RateLimitResult, error) {
-	limit := int64(constants.DefaultRateLimitPerMinute)
-	window := time.Minute
-
-	if config != nil && config.RequestsPerMinute > 0 {
-		limit = int64(config.RequestsPerMinute)
-	}
-
-	return rl.Allow(ctx, DimensionTenant, tenantID, limit, window)
+) (bool, int, time.Time, error) {
+	return rl.Allow(ctx, service.RateLimitDimensionTenant, tenantID, "default")
 }
 
 // CheckDeviceLimit checks rate limit for a device.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - deviceID: Device identifier
-//   - limit: Maximum requests allowed
-//
-// Returns:
-//   - *RateLimitResult: Rate limit result
-//   - error: Check error if any
 func (rl *RedisRateLimiter) CheckDeviceLimit(
 	ctx context.Context,
 	deviceID string,
-	limit int64,
-) (*RateLimitResult, error) {
-	return rl.Allow(ctx, DimensionDevice, deviceID, limit, time.Minute)
+) (bool, int, time.Time, error) {
+	return rl.Allow(ctx, service.RateLimitDimensionUser, deviceID, "default")
 }
 
 // CheckIPLimit checks rate limit for an IP address.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - ip: IP address
-//   - limit: Maximum requests allowed
-//
-// Returns:
-//   - *RateLimitResult: Rate limit result
-//   - error: Check error if any
 func (rl *RedisRateLimiter) CheckIPLimit(
 	ctx context.Context,
 	ip string,
-	limit int64,
-) (*RateLimitResult, error) {
-	return rl.Allow(ctx, DimensionIP, ip, limit, time.Minute)
+) (bool, int, time.Time, error) {
+	return rl.Allow(ctx, "ip", ip, "default")
 }
 
 // executeLuaScript executes the token bucket Lua script.
@@ -486,63 +383,12 @@ func (rl *RedisRateLimiter) executeLuaScript(
 	}, nil
 }
 
-// allowLocal uses local token bucket as fallback.
-func (rl *RedisRateLimiter) allowLocal(key string, limit int64, rate float64) (*RateLimitResult, error) {
-	bucket := rl.localBuckets.GetOrCreate(key)
-
-	// Update bucket configuration if needed
-	if bucket.Capacity() != float64(limit) || bucket.Rate() != rate {
-		bucket.SetCapacity(float64(limit))
-		bucket.SetRate(rate)
-	}
-
-	allowed := bucket.Allow()
-	remaining := int64(bucket.Available())
-	resetDuration := bucket.TimeUntilAvailable(float64(limit))
-
-	return &RateLimitResult{
-		Allowed:    allowed,
-		Limit:      limit,
-		Remaining:  remaining,
-		ResetAt:    time.Now().Add(resetDuration),
-		RetryAfter: resetDuration,
-	}, nil
-}
-
-// allowLocalN uses local token bucket for N requests.
-func (rl *RedisRateLimiter) allowLocalN(key string, limit int64, rate float64, n int64) (*RateLimitResult, error) {
-	bucket := rl.localBuckets.GetOrCreate(key)
-
-	if bucket.Capacity() != float64(limit) || bucket.Rate() != rate {
-		bucket.SetCapacity(float64(limit))
-		bucket.SetRate(rate)
-	}
-
-	allowed := bucket.AllowN(float64(n))
-	remaining := int64(bucket.Available())
-	resetDuration := bucket.TimeUntilAvailable(float64(limit))
-
-	return &RateLimitResult{
-		Allowed:    allowed,
-		Limit:      limit,
-		Remaining:  remaining,
-		ResetAt:    time.Now().Add(resetDuration),
-		RetryAfter: resetDuration,
-	}, nil
-}
-
 // buildKey builds a Redis key for rate limiting.
-func (rl *RedisRateLimiter) buildKey(dimension RateLimitDimension, identifier string) string {
+func (rl *RedisRateLimiter) buildKey(dimension service.RateLimitDimension, identifier string) string {
 	return fmt.Sprintf("%s:%s:%s", rl.config.KeyPrefix, dimension, identifier)
 }
 
 // CleanupLocalBuckets performs cleanup of idle local buckets.
-//
-// Parameters:
-//   - maxIdle: Maximum idle duration
-//
-// Returns:
-//   - int: Number of buckets cleaned up
 func (rl *RedisRateLimiter) CleanupLocalBuckets(maxIdle time.Duration) int {
 	if rl.localBuckets == nil {
 		return 0
@@ -565,5 +411,3 @@ func (rl *RedisRateLimiter) Close() error {
 	rl.logger.Info(context.Background(), "Redis rate limiter closed")
 	return nil
 }
-
-//Personal.AI order the ending

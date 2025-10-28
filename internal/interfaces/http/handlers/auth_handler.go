@@ -65,6 +65,41 @@ func (h *AuthHandler) IssueToken(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// RegisterDevice 注册设备并签发初始 Token
+// POST /api/v1/auth/register-device
+func (h *AuthHandler) RegisterDevice(c *gin.Context) {
+	h.metrics.RecordRequestStart(c.Request.Context(), "register_device")
+	var req dto.RegisterDeviceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn(c.Request.Context(), "Invalid register device request", logger.Error(err))
+		h.metrics.RecordRequestError(c.Request.Context(), "register_device", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse(err, ""))
+		return
+	}
+
+	// 验证请求参数
+	if err := utils.ValidateStruct(&req); err != nil {
+		h.logger.Warn(c.Request.Context(), "Validation failed", logger.Error(err))
+		h.metrics.RecordRequestError(c.Request.Context(), "register_device", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse(err, ""))
+		return
+	}
+
+	// 调用应用服务
+	response, err := h.authService.RegisterDevice(c.Request.Context(), &req)
+	if err != nil {
+		h.handleAuthError(c, err, "register_device")
+		return
+	}
+
+	h.logger.Info(c.Request.Context(), "Device registered and token issued successfully",
+		logger.String("tenant_id", req.TenantID),
+		logger.String("agent_id", req.AgentID),
+	)
+
+	c.JSON(http.StatusCreated, response)
+}
+
 // handleAuthError 统一处理认证错误
 func (h *AuthHandler) handleAuthError(c *gin.Context, err error, operation string) {
 	cbcErr, ok := errors.AsCBCError(err)

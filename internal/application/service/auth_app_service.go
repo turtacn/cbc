@@ -62,25 +62,33 @@ func NewAuthAppService(
 
 // RegisterDevice implements device registration and initial token issuance
 func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error) {
-	// Validate request
+	// 1. Validate request payload
 	if err := utils.ValidateStruct(req); err != nil {
 		s.logger.Error(ctx, "Invalid register device request", err)
-		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid register device request")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "invalid register device request", err.Error())
 	}
 
-	// Check tenant status
+	// 2. Defensive check for nil dependencies
+	if s.tenantRepo == nil || s.rateLimitService == nil || s.deviceRepo == nil || s.tokenService == nil {
+		s.logger.Error(ctx, "Service dependencies are not initialized", nil)
+		return nil, errors.New(errors.ErrCodeInternal, "service dependencies not initialized", "")
+	}
+
+	// 3. Check tenant status
 	tenant, err := s.tenantRepo.FindByID(ctx, req.TenantID)
 	if err != nil {
 		s.logger.Error(ctx, "Failed to get tenant", err, logger.String("tenant_id", req.TenantID))
 		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "failed to get tenant")
 	}
-
+	if tenant == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "tenant not found", "")
+	}
 	if tenant.Status != constants.TenantStatusActive {
 		s.logger.Warn(ctx, "Tenant is not active", logger.String("tenant_id", req.TenantID), logger.String("status", string(tenant.Status)))
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "tenant is not active", "")
 	}
 
-	// Check rate limit for MGR
+	// 4. Check rate limit
 	rateLimitKey := fmt.Sprintf("mgr:%s:register", req.ClientID)
 	allowed, _, _, err := s.rateLimitService.Allow(ctx, "mgr", rateLimitKey, "register")
 	if err != nil {
@@ -92,7 +100,7 @@ func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regist
 		return nil, errors.New(errors.ErrCodeRateLimitExceeded, "rate limit exceeded for MGR", "")
 	}
 
-	// Check if device already exists
+	// 5. Check if device already exists and handle logic
 	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
 	if err != nil && !errors.IsNotFoundError(err) {
 		s.logger.Error(ctx, "Failed to check device existence", err, logger.String("agent_id", req.AgentID))
@@ -100,51 +108,46 @@ func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regist
 	}
 
 	if existingDevice != nil {
-		// Device already registered, check device fingerprint
+		// Device already registered, verify fingerprint
 		if existingDevice.DeviceFingerprint != req.DeviceFingerprint {
 			s.logger.Warn(ctx, "Device fingerprint mismatch", logger.String("agent_id", req.AgentID))
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "device fingerprint mismatch", "")
 		}
-
-		// Return existing refresh token if still valid
-		s.logger.Info(ctx, "Device already registered, returning existing token", logger.String("agent_id", req.AgentID))
+		s.logger.Info(ctx, "Device already registered, proceeding to issue token", logger.String("agent_id", req.AgentID))
 	} else {
-		// Create new device
+		// Device not found, create a new one
 		device := &models.Device{
-			// AgentID:           req.AgentID,
+			DeviceID:          req.AgentID,
 			TenantID:          req.TenantID,
 			DeviceFingerprint: req.DeviceFingerprint,
-			// DeviceName:        req.DeviceName,
-			// DeviceType:        req.DeviceType,
-			// TrustLevel:        s.calculateInitialTrustLevel(req),
 			Status:            constants.DeviceStatusActive,
 			RegisteredAt:      time.Now(),
 			LastSeenAt:        time.Now(),
-			// IPAddress:         req.IPAddress,
-			// UserAgent:         req.UserAgent,
-			// Metadata:          req.Metadata,
 		}
 
 		if err := s.deviceRepo.Save(ctx, device); err != nil {
 			s.logger.Error(ctx, "Failed to create device", err, logger.String("agent_id", req.AgentID))
 			return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create device")
 		}
-
-		s.logger.Info(ctx, "Device registered successfully", logger.String("agent_id", req.AgentID))
+		s.logger.Info(ctx, "New device registered successfully", logger.String("agent_id", req.AgentID))
 	}
 
-	// Issue token pair using domain service
+	// 6. Issue token pair
 	refreshToken, accessToken, err := s.tokenService.IssueTokenPair(ctx, req.TenantID, req.AgentID, req.DeviceFingerprint, nil, nil)
 	if err != nil {
 		s.logger.Error(ctx, "Failed to issue token pair", err, logger.String("agent_id", req.AgentID))
-		return nil, err
+		return nil, err // Propagate domain service error
 	}
 
-	// Record audit log
+	// Defensive check on tokens
+	if refreshToken == nil || accessToken == nil {
+		return nil, errors.New(errors.ErrCodeInternal, "token service returned nil tokens without error", "")
+	}
+
+	// 7. Log and return response
 	s.logger.Info(ctx, "Device registration and token issuance successful",
 		logger.String("tenant_id", req.TenantID),
 		logger.String("agent_id", req.AgentID),
-		logger.String("mgr_client_id", req.ClientID),
 	)
 
 	return &dto.TokenResponse{
@@ -211,7 +214,7 @@ func (s *authAppServiceImpl) IssueToken(ctx context.Context, req *dto.IssueToken
 	// Update device last seen time
 	device.LastSeenAt = time.Now()
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
-		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err), logger.String("agent_id", req.AgentID))
+		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err))
 		// Don't fail the request if last seen update fails
 	}
 
@@ -280,7 +283,7 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 	// Update device last seen time
 	device.LastSeenAt = time.Now()
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
-		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err), logger.String("agent_id", refreshToken.DeviceID))
+		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err))
 		// Don't fail the request if last seen update fails
 	}
 

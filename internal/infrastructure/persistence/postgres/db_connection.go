@@ -11,12 +11,15 @@ import (
 	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // DBConnection manages PostgreSQL database connection pool lifecycle.
 // It provides thread-safe connection pool with automatic health monitoring.
 type DBConnection struct {
 	pool   *pgxpool.Pool
+	gormDB *gorm.DB
 	config *config.DatabaseConfig
 	logger logger.Logger
 }
@@ -81,8 +84,17 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 		return nil, errors.New(errors.CodeInternal, "failed to create database connection pool")
 	}
 
+	// Create GORM connection
+	gormDB, err := gorm.Open(postgres.Open(connString), &gorm.Config{})
+	if err != nil {
+		log.Error(ctx, "Failed to create GORM database connection", err)
+		pool.Close()
+		return nil, errors.New(errors.CodeInternal, "failed to create GORM database connection")
+	}
+
 	dbConn := &DBConnection{
 		pool:   pool,
+		gormDB: gormDB,
 		config: cfg,
 		logger: log,
 	}
@@ -108,6 +120,11 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 //   - *pgxpool.Pool: Active connection pool instance
 func (db *DBConnection) Pool() *pgxpool.Pool {
 	return db.pool
+}
+
+// DB returns the underlying gorm.DB for executing database operations.
+func (db *DBConnection) DB() *gorm.DB {
+	return db.gormDB
 }
 
 // Ping verifies database connectivity and responsiveness.

@@ -19,15 +19,7 @@ func (a *ServiceAdapter) Allow(
 	identifier string,
 	action string,
 ) (bool, int, time.Time, error) {
-	// choose sensible defaults; you can make these configurable later
-	const defaultLimit int64 = 60
-	const defaultWindow = time.Minute
-
-	res, err := a.RL.Allow(ctx, infra.RateLimitDimension(dim), identifier, defaultLimit, defaultWindow)
-	if err != nil {
-		return false, 0, time.Time{}, err
-	}
-	return res.Allowed, int(res.Remaining), res.ResetAt, nil
+	return a.RL.Allow(ctx, dim, identifier, action)
 }
 
 func (a *ServiceAdapter) AllowN(
@@ -37,14 +29,7 @@ func (a *ServiceAdapter) AllowN(
 	action string,
 	n int,
 ) (allowed bool, remaining int, resetAt time.Time, err error) {
-	// choose sensible defaults; you can make these configurable later
-	const defaultLimit int64 = 60
-	const defaultWindow = time.Minute
-	res, err := a.RL.AllowN(ctx, infra.RateLimitDimension(dimension), identifier, int64(n), defaultLimit, defaultWindow)
-	if err != nil {
-		return false, 0, time.Time{}, err
-	}
-	return res.Allowed, int(res.Remaining), res.ResetAt, nil
+	return a.RL.AllowN(ctx, dimension, identifier, action, n)
 }
 func (a *ServiceAdapter) ResetLimit(
 	ctx context.Context,
@@ -52,7 +37,7 @@ func (a *ServiceAdapter) ResetLimit(
 	identifier string,
 	action string,
 ) error {
-	return a.RL.ResetLimit(ctx, infra.RateLimitDimension(dimension), identifier)
+	return a.RL.ResetLimit(ctx, dimension, identifier, action)
 }
 func (a *ServiceAdapter) GetCurrentUsage(
 	ctx context.Context,
@@ -62,7 +47,7 @@ func (a *ServiceAdapter) GetCurrentUsage(
 ) (usage int, limit int, resetAt time.Time, err error) {
 	// choose sensible defaults; you can make these configurable later
 	const defaultLimit int64 = 60
-	res, err := a.RL.GetCurrentUsage(ctx, infra.RateLimitDimension(dimension), identifier, defaultLimit)
+	res, err := a.RL.GetCurrentUsage(ctx, dimension, identifier, defaultLimit)
 	if err != nil {
 		return 0, 0, time.Time{}, err
 	}

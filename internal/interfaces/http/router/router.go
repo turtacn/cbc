@@ -86,13 +86,8 @@ func (r *Router) SetupRoutes() {
 		// 认证相关路由
 		auth := v1.Group("/auth")
 		{
+			auth.POST("/register-device", r.authHandler.RegisterDevice)
 			auth.POST("/token", r.authHandler.IssueToken)
-		}
-
-		// 设备相关路由（需要认证）
-		devices := v1.Group("/devices")
-		{
-			devices.POST("", r.deviceHandler.RegisterDevice)
 		}
 	}
 
@@ -157,4 +152,8 @@ func (r *Router) Stop(ctx context.Context) error {
 
 	r.logger.Info(ctx, "Stopping HTTP server...")
 	return r.server.Shutdown(ctx)
+}
+
+func (r *Router) Engine() *gin.Engine {
+	return r.engine
 }

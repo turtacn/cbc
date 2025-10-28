@@ -11,7 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
+	"github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
@@ -37,109 +37,112 @@ func TestRedisRateLimiter_Allow(t *testing.T) {
 	client := setup(t)
 	log := logger.NewDefaultLogger()
 	config := DefaultRateLimiterConfig()
+	config.DefaultLimit = 3
+	config.DefaultWindow = time.Second * 2
 	limiter, err := NewRedisRateLimiter(client, config, log)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	key := "test_allow"
-	limit := int64(3)
-	window := time.Second * 2
 
 	// First 3 requests should be allowed
 	for i := 0; i < 3; i++ {
-		res, err := limiter.Allow(ctx, DimensionDevice, key, limit, window)
+		allowed, remaining, _, err := limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 		require.NoError(t, err)
-		assert.True(t, res.Allowed)
-		assert.Equal(t, limit, res.Limit)
-		assert.Equal(t, limit-int64(i)-1, res.Remaining)
+		assert.True(t, allowed)
+		assert.Equal(t, 3-i-1, remaining)
 	}
 
 	// 4th request should be denied
-	res, err := limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	allowed, _, resetAt, err := limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	assert.False(t, res.Allowed)
-	assert.Equal(t, limit, res.Limit)
-	assert.Equal(t, int64(0), res.Remaining)
-	assert.WithinDuration(t, time.Now().Add(window), res.ResetAt, time.Second)
+	assert.False(t, allowed)
+	assert.WithinDuration(t, time.Now().Add(config.DefaultWindow), resetAt, time.Second)
 }
 
 // TestRedisRateLimiter_AllowN verifies allowing multiple requests at once
 func TestRedisRateLimiter_AllowN(t *testing.T) {
 	client := setup(t)
 	log := logger.NewDefaultLogger()
-	limiter, err := NewRedisRateLimiter(client, DefaultRateLimiterConfig(), log)
+	config := DefaultRateLimiterConfig()
+	config.DefaultLimit = 5
+	limiter, err := NewRedisRateLimiter(client, config, log)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	key := "test_allow_n"
 
 	// Allow 2 requests, should succeed
-	res, err := limiter.AllowN(ctx, DimensionDevice, key, 2, 5, time.Minute)
+	allowed, remaining, _, err := limiter.AllowN(ctx, service.RateLimitDimensionUser, key, "default", 2)
 	require.NoError(t, err)
-	assert.True(t, res.Allowed)
-	assert.Equal(t, int64(3), res.Remaining)
+	assert.True(t, allowed)
+	assert.Equal(t, 3, remaining)
 
 	// Allow 4 requests, should fail
-	res, err = limiter.AllowN(ctx, DimensionDevice, key, 4, 5, time.Minute)
+	allowed, _, _, err = limiter.AllowN(ctx, service.RateLimitDimensionUser, key, "default", 4)
 	require.NoError(t, err)
-	assert.False(t, res.Allowed)
+	assert.False(t, allowed)
 }
 
 // TestRedisRateLimiter_AllowWithExpiration verifies that the rate limit resets after the window
 func TestRedisRateLimiter_AllowWithExpiration(t *testing.T) {
 	client := setup(t)
 	log := logger.NewDefaultLogger()
-	limiter, err := NewRedisRateLimiter(client, DefaultRateLimiterConfig(), log)
+	config := DefaultRateLimiterConfig()
+	config.DefaultLimit = 2
+	config.DefaultWindow = 200 * time.Millisecond
+	limiter, err := NewRedisRateLimiter(client, config, log)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	key := fmt.Sprintf("test:%d", time.Now().UnixNano())
-	limit := int64(2)
-	window := 200 * time.Millisecond
 
 	// Exhaust the limit
-	_, err = limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	_, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	res, err := limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	allowed, remaining, _, err := limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	require.True(t, res.Allowed)
-	require.Equal(t, int64(0), res.Remaining)
+	require.True(t, allowed)
+	require.Equal(t, 0, remaining)
 
 	// Wait for the window to expire
 	time.Sleep(220 * time.Millisecond)
 
 	// Next request should be allowed
-	res2, err := limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	allowed, remaining, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	assert.True(t, res2.Allowed)
-	assert.Equal(t, limit-1, res2.Remaining)
+	assert.True(t, allowed)
+	assert.Equal(t, 1, remaining)
 }
 
 // TestRedisRateLimiter_ResetLimit verifies resetting the rate limit
 func TestRedisRateLimiter_ResetLimit(t *testing.T) {
 	client := setup(t)
 	log := logger.NewDefaultLogger()
-	limiter, err := NewRedisRateLimiter(client, DefaultRateLimiterConfig(), log)
+	config := DefaultRateLimiterConfig()
+	config.DefaultLimit = 1
+	limiter, err := NewRedisRateLimiter(client, config, log)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	key := "test_reset"
-	limit := int64(1)
-	window := time.Minute
 
 	// Exhaust the limit
-	_, err = limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	allowed, _, _, err := limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	res, err := limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	require.True(t, allowed)
+
+	// 2nd request should be denied
+	allowed, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	require.False(t, res.Allowed)
+	assert.False(t, allowed)
 
 	// Reset the limit
-	err = limiter.ResetLimit(ctx, DimensionDevice, key)
+	err = limiter.ResetLimit(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
 
 	// Next request should be allowed
-	res, err = limiter.Allow(ctx, DimensionDevice, key, limit, window)
+	allowed, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	assert.True(t, res.Allowed)
+	assert.True(t, allowed)
 }

@@ -180,14 +180,14 @@ func (m *MockCryptoService) ExtractKeyID(tokenString string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockCryptoService) EncryptSensitiveData(plaintext string, tenantID string) (string, error) {
-	args := m.Called(plaintext, tenantID)
-	return args.String(0), args.Error(1)
+func (m *MockCryptoService) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+	args := m.Called(ctx, data)
+	return args.Get(0).([]byte), args.Error(1)
 }
 
-func (m *MockCryptoService) DecryptSensitiveData(ciphertext string, tenantID string) (string, error) {
-	args := m.Called(ciphertext, tenantID)
-	return args.String(0), args.Error(1)
+func (m *MockCryptoService) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+	args := m.Called(ctx, data)
+	return args.Get(0).([]byte), args.Error(1)
 }
 
 func TestTokenDomainService_RefreshToken(t *testing.T) {
@@ -207,6 +207,10 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 		"token_type": string(constants.TokenTypeRefresh),
 		"exp":       float64(now.Add(1 * time.Hour).Unix()),
 	}
+	token := &models.Token{
+		JTI:      jti,
+		TenantID: tenantID,
+	}
 
 	tests := []struct {
 		name          string
@@ -218,10 +222,10 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 			name: "Successfully refresh token",
 			setupMocks: func() {
 				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
+				mockRepo.On("FindByJTI", ctx, jti).Return(token, nil).Once()
 				mockRepo.On("IsRevoked", ctx, jti).Return(false, nil).Once()
-				mockRepo.On("FindByJTI", ctx, jti).Return(&models.Token{}, nil).Once()
-				mockCrypto.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-access-token", "new-key-id", nil).Twice()
-				mockRepo.On("Save", ctx, mock.AnythingOfType("*models.Token")).Return(nil).Twice()
+				mockRepo.On("Revoke", ctx, jti, "rotated").Return(nil).Once()
+				mockRepo.On("Save", ctx, mock.AnythingOfType("*models.Token")).Return(nil).Once()
 			},
 			wantErr: false,
 		},
@@ -238,6 +242,7 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 			name: "Refresh token has been revoked",
 			setupMocks: func() {
 				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
+				mockRepo.On("FindByJTI", ctx, jti).Return(token, nil).Once()
 				mockRepo.On("IsRevoked", ctx, jti).Return(true, nil).Once()
 			},
 			wantErr:       true,
