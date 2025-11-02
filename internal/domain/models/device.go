@@ -36,6 +36,15 @@ type Device struct {
 	// DeviceName is a user-friendly name for the device
 	DeviceName string `json:"device_name,omitempty" db:"device_name"`
 
+	// DisplayName is a user-friendly name for the device
+	DisplayName string `json:"display_name,omitempty" db:"display_name"`
+
+	// Platform is the operating system of the device
+	Platform string `json:"platform,omitempty" db:"platform"`
+
+	// AgentVersion is the version of the client application
+	AgentVersion string `json:"agent_version,omitempty" db:"agent_version"`
+
 	// DeviceFingerprint is a unique hash generated from device characteristics
 	DeviceFingerprint string `json:"device_fingerprint" db:"device_fingerprint"`
 

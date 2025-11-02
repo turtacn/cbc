@@ -40,3 +40,9 @@ type RateLimitService interface {
 		identifier string,
 	) (allowed bool, remaining int, resetAt time.Time, err error)
 }
+
+// TokenBlacklistStore defines the interface for token blacklist operations.
+type TokenBlacklistStore interface {
+	Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error
+	IsRevoked(ctx context.Context, tenantID, jti string) (bool, error)
+}

@@ -38,15 +38,18 @@ import (
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
 	redisInfra "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
+	redisStore "github.com/turtacn/cbc/internal/infrastructure/redis"
 
 	// Interface Layer
 	grpcInterface "github.com/turtacn/cbc/internal/interfaces/grpc"
 	authpb "github.com/turtacn/cbc/internal/interfaces/grpc/proto"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
+	"github.com/turtacn/cbc/internal/interfaces/http/middleware"
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 
 	// Common Packages
 	"github.com/turtacn/cbc/pkg/logger"
+	"github.com/redis/go-redis/v9"
 )
 
 // ... (constants and Application struct definition remain the same) ...
@@ -84,6 +87,7 @@ type Application struct {
 	// Domain Services (via Adapters)
 	cryptoService    domainService.CryptoService
 	rateLimitService domainService.RateLimitService
+	blacklistStore   domainService.TokenBlacklistStore
 
 	// Monitoring
 	metrics *monitoring.Metrics
@@ -235,6 +239,7 @@ func (app *Application) initDomainServices() error {
 	// Adapters wire infrastructure components to domain interfaces
 	app.cryptoService = cryptoadapter.NewServiceAdapter(app.keyManager, app.logger)
 	app.rateLimitService = &ratelimitadapter.ServiceAdapter{RL: app.rateLimiter}
+	app.blacklistStore = redisStore.NewTokenBlacklistStore(app.redisClient.GetClient().(*redis.Client))
 	app.logger.Info(app.ctx, "Domain services initialized via adapters")
 	return nil
 }
@@ -256,7 +261,7 @@ func (app *Application) initRepositories() error {
 
 func (app *Application) initApplicationServices() error {
 	tokenDomainService := domainService.NewTokenDomainService(app.tokenRepo, app.cryptoService, app.logger)
-	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.logger)
+	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.logger)
 	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.cryptoService, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
@@ -275,7 +280,8 @@ func (app *Application) initInterfaces() error {
 	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, nil, app.logger)
 	// 构造 JWKS handler
 	jwksHandler := handlers.NewJWKSHandler(app.cryptoService, app.logger, metricsAdapter)
-	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler)
+	authMiddleware := middleware.RequireJWT(app.cryptoService, app.blacklistStore, app.logger)
+	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler, authMiddleware)
 	router.SetupRoutes()
 	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine()}
 	app.logger.Info(app.ctx, "HTTP interface initialized", logger.String("port", httpPort))

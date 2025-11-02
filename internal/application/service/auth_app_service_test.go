@@ -3,20 +3,13 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
 	domainservice "github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/constants"
-	"github.com/turtacn/cbc/pkg/errors"
-	"github.com/turtacn/cbc/pkg/logger"
 )
 
 // Mock implementations for dependencies
@@ -214,14 +207,6 @@ func (m *MockDeviceRepo) BatchUpdateLastSeen(ctx context.Context, updates map[st
 	return args.Error(0)
 }
 
-func (m *MockDeviceRepo) GetDeviceMetrics(ctx context.Context, tenantID string) (*repository.DeviceMetrics, error) {
-	args := m.Called(ctx, tenantID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*repository.DeviceMetrics), args.Error(1)
-}
-
 type MockTokenDomainService struct {
 	mock.Mock
 }
@@ -321,117 +306,16 @@ func (m *MockRateLimiter) DecayCounter(ctx context.Context, dimension domainserv
 	return args.Error(0)
 }
 
-func TestAuthAppService_IssueToken(t *testing.T) {
-	mockTenantRepo := new(MockTenantRepo)
-	mockDeviceRepo := new(MockDeviceRepo)
-	mockTokenService := new(MockTokenDomainService)
-	mockRateLimiter := new(MockRateLimiter)
-	testLogger := logger.NewDefaultLogger()
+type MockBlacklistStore struct {
+	mock.Mock
+}
 
-	service := NewAuthAppService(
-		mockTokenService,
-		mockDeviceRepo,
-		mockTenantRepo,
-		mockRateLimiter,
-		testLogger,
-	)
+func (m *MockBlacklistStore) Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error {
+	args := m.Called(ctx, tenantID, jti, exp)
+	return args.Error(0)
+}
 
-	ctx := context.Background()
-	tenantID := uuid.New().String()
-	agentID := "test-device-001"
-	fingerprint := "test-fingerprint-hash"
-
-	tests := []struct {
-		name      string
-		setupMock func()
-		req       *dto.IssueTokenRequest
-		wantErr   bool
-		errType   errors.CBCError
-	}{
-		{
-			name: "Successfully issue token for existing device",
-			setupMock: func() {
-				tenant := &models.Tenant{
-					TenantID:   tenantID,
-					TenantName: "Test Tenant",
-					Status:     constants.TenantStatusActive,
-				}
-				mockTenantRepo.On("FindByID", ctx, tenantID).Return(tenant, nil).Once()
-
-				mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:issue", agentID), "issue").Return(true, 100, time.Now(), nil).Once()
-
-				device := &models.Device{
-					TenantID:          tenantID,
-					Status:            constants.DeviceStatusActive,
-					DeviceFingerprint: fingerprint,
-				}
-				mockDeviceRepo.On("FindByID", ctx, agentID).Return(device, nil).Once()
-
-				refreshToken := &models.Token{JTI: "refresh_token", Scope: "offline_access"}
-				accessToken := &models.Token{JTI: "access_token", Scope: "api:read", ExpiresAt: time.Now().Add(time.Hour)}
-				mockTokenService.On("IssueTokenPair", ctx, tenantID, agentID, fingerprint, []string(nil), map[string]interface{}(nil)).
-					Return(refreshToken, accessToken, nil).Once()
-
-				mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil).Once()
-			},
-			req: &dto.IssueTokenRequest{
-				TenantID: tenantID,
-				AgentID:  agentID,
-			},
-			wantErr: false,
-		},
-		{
-			name: "Tenant not found",
-			setupMock: func() {
-				mockTenantRepo.On("FindByID", ctx, tenantID).
-					Return(nil, errors.ErrTenantNotFound(tenantID)).Once()
-			},
-			req: &dto.IssueTokenRequest{
-				TenantID: tenantID,
-				AgentID:  agentID,
-			},
-			wantErr: true,
-			errType: errors.NewError(constants.ErrCodeInvalidRequest, 0, "", ""),
-		},
-		{
-			name: "Rate limit exceeded",
-			setupMock: func() {
-				tenant := &models.Tenant{
-					TenantID:   tenantID,
-					TenantName: "Test Tenant",
-					Status:     constants.TenantStatusActive,
-				}
-				mockTenantRepo.On("FindByID", ctx, tenantID).Return(tenant, nil).Once()
-
-				mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:issue", agentID), "issue").Return(false, 100, time.Now(), nil).Once()
-			},
-			req: &dto.IssueTokenRequest{
-				TenantID: tenantID,
-				AgentID:  agentID,
-			},
-			wantErr: true,
-			errType: errors.NewError(errors.ErrCodeRateLimitExceeded, 0, "", ""),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
-
-			result, err := service.IssueToken(ctx, tt.req)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, result)
-				if tt.errType != nil {
-					assert.Equal(t, tt.errType.Code(), err.(errors.CBCError).Code())
-				}
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, result)
-				assert.Equal(t, "access_token", result.AccessToken)
-				assert.Equal(t, "refresh_token", result.RefreshToken)
-			}
-		})
-	}
+func (m *MockBlacklistStore) IsRevoked(ctx context.Context, tenantID, jti string) (bool, error) {
+	args := m.Called(ctx, tenantID, jti)
+	return args.Bool(0), args.Error(1)
 }

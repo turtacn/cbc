@@ -27,6 +27,7 @@ type Router struct {
 	authHandler   *handlers.AuthHandler
 	deviceHandler *handlers.DeviceHandler
 	jwksHandler   *handlers.JWKSHandler
+	authMiddleware gin.HandlerFunc
 	server        *http.Server
 }
 
@@ -38,6 +39,7 @@ func NewRouter(
 	authHandler *handlers.AuthHandler,
 	deviceHandler *handlers.DeviceHandler,
 	jwksHandler *handlers.JWKSHandler,
+	authMiddleware gin.HandlerFunc,
 ) *Router {
 	// 设置 Gin 模式
 	gin.SetMode(gin.ReleaseMode)
@@ -51,6 +53,7 @@ func NewRouter(
 		authHandler:   authHandler,
 		deviceHandler: deviceHandler,
 		jwksHandler:   jwksHandler,
+		authMiddleware: authMiddleware,
 	}
 }
 
@@ -96,6 +99,7 @@ func (r *Router) SetupRoutes() {
 			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
 		}
 		devices := v1.Group("/devices")
+		devices.Use(r.authMiddleware)
 		{
 			devices.POST("", r.deviceHandler.RegisterDevice)
 			devices.GET("/:device_id", r.deviceHandler.GetDevice)

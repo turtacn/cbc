@@ -49,6 +49,7 @@ type ServerConfig struct {
 
 // DatabaseConfig PostgreSQL 配置
 type DatabaseConfig struct {
+	DSN             string        `mapstructure:"dsn" env:"PG_DSN"`
 	Host            string        `mapstructure:"host" env:"CBC_AUTH_DB_HOST" default:"localhost"`
 	Port            int           `mapstructure:"port" env:"CBC_AUTH_DB_PORT" default:"5432"`
 	User            string        `mapstructure:"user" env:"CBC_AUTH_DB_USER" default:"cbc_auth"`
@@ -65,10 +66,11 @@ type DatabaseConfig struct {
 
 // RedisConfig Redis 配置
 type RedisConfig struct {
+	Addr string `mapstructure:"addr" env:"REDIS_ADDR"`
 	// 单节点配置
 	Address  string `mapstructure:"address" env:"CBC_AUTH_REDIS_ADDRESS" default:"localhost:6379"`
 	Password string `mapstructure:"password" env:"CBC_AUTH_REDIS_PASSWORD"`
-	DB       int    `mapstructure:"db" env:"CBC_AUTH_REDIS_DB" default:"0"`
+	DB       int    `mapstructure:"db" env:"REDIS_DB"`
 
 	// 集群配置
 	ClusterEnabled bool     `mapstructure:"cluster_enabled" env:"CBC_AUTH_REDIS_CLUSTER_ENABLED" default:"false"`

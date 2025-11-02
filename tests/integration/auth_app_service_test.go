@@ -165,14 +165,6 @@ func (m *MockDeviceRepository) BatchUpdateLastSeen(ctx context.Context, updates 
 	return args.Error(0)
 }
 
-func (m *MockDeviceRepository) GetDeviceMetrics(ctx context.Context, tenantID string) (*repository.DeviceMetrics, error) {
-	args := m.Called(ctx, tenantID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*repository.DeviceMetrics), args.Error(1)
-}
-
 // MockTenantRepository is a mock implementation of repository.TenantRepository
 type MockTenantRepository struct {
 	mock.Mock
@@ -274,15 +266,31 @@ func (m *MockRateLimitService) Allow(ctx context.Context, dimension service.Rate
 	return args.Bool(0), args.Int(1), args.Get(2).(time.Time), args.Error(3)
 }
 
+type MockBlacklistStore struct {
+	mock.Mock
+}
+
+func (m *MockBlacklistStore) Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error {
+	args := m.Called(ctx, tenantID, jti, exp)
+	return args.Error(0)
+}
+
+func (m *MockBlacklistStore) IsRevoked(ctx context.Context, tenantID, jti string) (bool, error) {
+	args := m.Called(ctx, tenantID, jti)
+	return args.Bool(0), args.Error(1)
+}
+
+
 func TestAuthAppService_RegisterDevice(t *testing.T) {
 	// Setup
 	mockTokenSvc := new(MockTokenService)
 	mockDeviceRepo := new(MockDeviceRepository)
 	mockTenantRepo := new(MockTenantRepository)
 	mockRateLimitSvc := new(MockRateLimitService)
+	mockBlacklist := new(MockBlacklistStore)
 	log := logger.NewDefaultLogger()
 
-	authService := app_service.NewAuthAppService(mockTokenSvc, mockDeviceRepo, mockTenantRepo, mockRateLimitSvc, log)
+	authService := app_service.NewAuthAppService(mockTokenSvc, mockDeviceRepo, mockTenantRepo, mockRateLimitSvc, mockBlacklist, log)
 
 	ctx := context.Background()
 	req := &dto.RegisterDeviceRequest{
@@ -328,9 +336,10 @@ func TestAuthAppService_RefreshToken(t *testing.T) {
 	mockDeviceRepo := new(MockDeviceRepository)
 	mockTenantRepo := new(MockTenantRepository)
 	mockRateLimitSvc := new(MockRateLimitService)
+	mockBlacklist := new(MockBlacklistStore)
 	log := logger.NewDefaultLogger()
 
-	authService := app_service.NewAuthAppService(mockTokenSvc, mockDeviceRepo, mockTenantRepo, mockRateLimitSvc, log)
+	authService := app_service.NewAuthAppService(mockTokenSvc, mockDeviceRepo, mockTenantRepo, mockRateLimitSvc, mockBlacklist, log)
 
 	ctx := context.Background()
 	req := &dto.RefreshTokenRequest{
@@ -348,6 +357,7 @@ func TestAuthAppService_RefreshToken(t *testing.T) {
 	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(device, nil)
 	mockTokenSvc.On("RefreshToken", ctx, req.RefreshToken, mock.Anything).Return(newRefreshToken, newAccessToken, nil) // Correct order: new refresh, then new access
 	mockDeviceRepo.On("Update", ctx, device).Return(nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(false, nil)
 
 	// Execute
 	resp, err := authService.RefreshToken(ctx, req)

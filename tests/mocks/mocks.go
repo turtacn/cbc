@@ -10,6 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
+	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/internal/domain/repository"
 	"github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/constants"
 )
@@ -195,13 +197,28 @@ func (m *MockRedisConnectionManager) HealthCheck(ctx context.Context) (map[strin
 }
 
 // MockRateLimitService is a mock of RateLimitService
-type MockRateLimitService struct {
+type MockRateLimiter struct {
 	mock.Mock
 }
 
-func (m *MockRateLimitService) Allow(ctx context.Context, dimension service.RateLimitDimension, key string, identifier string) (bool, int, time.Time, error) {
+func (m *MockRateLimiter) Allow(ctx context.Context, dimension service.RateLimitDimension, key string, identifier string) (bool, int, time.Time, error) {
 	args := m.Called(ctx, dimension, key, identifier)
 	return args.Bool(0), args.Int(1), args.Get(2).(time.Time), args.Error(3)
+}
+
+
+type MockBlacklistStore struct {
+	mock.Mock
+}
+
+func (m *MockBlacklistStore) Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error {
+	args := m.Called(ctx, tenantID, jti, exp)
+	return args.Error(0)
+}
+
+func (m *MockBlacklistStore) IsRevoked(ctx context.Context, tenantID, jti string) (bool, error) {
+	args := m.Called(ctx, tenantID, jti)
+	return args.Bool(0), args.Error(1)
 }
 
 // MockHTTPMetrics is a mock of HTTPMetrics
@@ -219,4 +236,286 @@ func (m *MockHTTPMetrics) RecordRequestDuration(ctx context.Context, operation s
 
 func (m *MockHTTPMetrics) RecordRequestError(ctx context.Context, route string, status int) {
 	m.Called(ctx, route, status)
+}
+
+type MockDeviceRepo struct {
+	mock.Mock
+}
+
+func (m *MockDeviceRepo) FindByID(ctx context.Context, id string) (*models.Device, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Device), args.Error(1)
+}
+
+func (m *MockDeviceRepo) Save(ctx context.Context, device *models.Device) error {
+	args := m.Called(ctx, device)
+	return args.Error(0)
+}
+
+func (m *MockDeviceRepo) Update(ctx context.Context, device *models.Device) error {
+	args := m.Called(ctx, device)
+	return args.Error(0)
+}
+
+func (m *MockDeviceRepo) FindByTenantID(ctx context.Context, tenantID string, page, pageSize int) ([]*models.Device, int64, error) {
+	args := m.Called(ctx, tenantID, page, pageSize)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]*models.Device), args.Get(1).(int64), args.Error(2)
+}
+
+type MockTenantRepo struct {
+	mock.Mock
+}
+
+func (m *MockTenantRepo) Save(ctx context.Context, tenant *models.Tenant) error {
+	args := m.Called(ctx, tenant)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) Update(ctx context.Context, tenant *models.Tenant) error {
+	args := m.Called(ctx, tenant)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) FindByID(ctx context.Context, tenantID string) (*models.Tenant, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Tenant), args.Error(1)
+}
+
+func (m *MockTenantRepo) FindByName(ctx context.Context, name string) (*models.Tenant, error) {
+	args := m.Called(ctx, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Tenant), args.Error(1)
+}
+
+func (m *MockTenantRepo) FindAll(ctx context.Context, limit, offset int) ([]*models.Tenant, int64, error) {
+	args := m.Called(ctx, limit, offset)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]*models.Tenant), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockTenantRepo) FindActiveAll(ctx context.Context) ([]*models.Tenant, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.Tenant), args.Error(1)
+}
+
+func (m *MockTenantRepo) Exists(ctx context.Context, tenantID string) (bool, error) {
+	args := m.Called(ctx, tenantID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockTenantRepo) UpdateStatus(ctx context.Context, tenantID string, status constants.TenantStatus) error {
+	args := m.Called(ctx, tenantID, status)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) UpdateRateLimitConfig(ctx context.Context, tenantID string, config *models.RateLimitConfig) error {
+	args := m.Called(ctx, tenantID, config)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) UpdateTokenTTLConfig(ctx context.Context, tenantID string, config *models.TokenTTLConfig) error {
+	args := m.Called(ctx, tenantID, config)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) UpdateKeyRotationPolicy(ctx context.Context, tenantID string, policy *models.KeyRotationPolicy) error {
+	args := m.Called(ctx, tenantID, policy)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) Delete(ctx context.Context, tenantID string) error {
+	args := m.Called(ctx, tenantID)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) GetTenantMetrics(ctx context.Context, tenantID string) (*repository.TenantMetrics, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.TenantMetrics), args.Error(1)
+}
+
+func (m *MockTenantRepo) GetAllMetrics(ctx context.Context) (*repository.SystemMetrics, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.SystemMetrics), args.Error(1)
+}
+
+func (m *MockTenantRepo) IncrementRequestCount(ctx context.Context, tenantID string, count int64) error {
+	args := m.Called(ctx, tenantID, count)
+	return args.Error(0)
+}
+
+func (m *MockTenantRepo) UpdateLastActivityAt(ctx context.Context, tenantID string, lastActivityAt time.Time) error {
+	args := m.Called(ctx, tenantID, lastActivityAt)
+	return args.Error(0)
+}
+
+type MockTokenRepo struct {
+	mock.Mock
+}
+
+func (m *MockTokenRepo) Save(ctx context.Context, token *models.Token) error {
+	args := m.Called(ctx, token)
+	return args.Error(0)
+}
+
+func (m *MockTokenRepo) SaveBatch(ctx context.Context, tokens []*models.Token) error {
+	args := m.Called(ctx, tokens)
+	return args.Error(0)
+}
+
+func (m *MockTokenRepo) FindByJTI(ctx context.Context, jti string) (*models.Token, error) {
+	args := m.Called(ctx, jti)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
+func (m *MockTokenRepo) FindByAgentID(ctx context.Context, agentID string) ([]*models.Token, error) {
+	args := m.Called(ctx, agentID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.Token), args.Error(1)
+}
+
+func (m *MockTokenRepo) FindByTenantID(ctx context.Context, tenantID string, limit, offset int) ([]*models.Token, int64, error) {
+	args := m.Called(ctx, tenantID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]*models.Token), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockTokenRepo) FindActiveByAgentID(ctx context.Context, agentID string) ([]*models.Token, error) {
+	args := m.Called(ctx, agentID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.Token), args.Error(1)
+}
+
+func (m *MockTokenRepo) Revoke(ctx context.Context, jti string, reason string) error {
+	args := m.Called(ctx, jti, reason)
+	return args.Error(0)
+}
+
+func (m *MockTokenRepo) RevokeByAgentID(ctx context.Context, agentID string, reason string) (int64, error) {
+	args := m.Called(ctx, agentID, reason)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockTokenRepo) RevokeByTenantID(ctx context.Context, tenantID string, reason string) (int64, error) {
+	args := m.Called(ctx, tenantID, reason)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockTokenRepo) IsRevoked(ctx context.Context, jti string) (bool, error) {
+	args := m.Called(ctx, jti)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockTokenRepo) DeleteExpired(ctx context.Context, before time.Time) (int64, error) {
+	args := m.Called(ctx, before)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockTokenRepo) CountByTenantID(ctx context.Context, tenantID string) (int64, error) {
+	args := m.Called(ctx, tenantID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockTokenRepo) CountActiveByTenantID(ctx context.Context, tenantID string) (int64, error) {
+	args := m.Called(ctx, tenantID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockTokenRepo) UpdateLastUsedAt(ctx context.Context, jti string, lastUsedAt time.Time) error {
+	args := m.Called(ctx, jti, lastUsedAt)
+	return args.Error(0)
+}
+
+type MockTokenService struct {
+	mock.Mock
+}
+
+func (m *MockTokenService) IssueTokenPair(ctx context.Context, tenantID, agentID, deviceFingerprint string, scope []string, metadata map[string]interface{}) (*models.Token, *models.Token, error) {
+	args := m.Called(ctx, tenantID, agentID, deviceFingerprint, scope, metadata)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	return args.Get(0).(*models.Token), args.Get(1).(*models.Token), args.Error(2)
+}
+
+func (m *MockTokenService) RefreshToken(ctx context.Context, refreshTokenString string, requestedScope []string) (*models.Token, *models.Token, error) {
+	args := m.Called(ctx, refreshTokenString, requestedScope)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	return args.Get(0).(*models.Token), args.Get(1).(*models.Token), args.Error(2)
+}
+
+func (m *MockTokenService) VerifyToken(ctx context.Context, tokenString string, tokenType constants.TokenType, tenantID string) (*models.Token, error) {
+	args := m.Called(ctx, tokenString, tokenType, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
+func (m *MockTokenService) RevokeToken(ctx context.Context, jti, tenantID, reason string) error {
+	args := m.Called(ctx, jti, tenantID, reason)
+	return args.Error(0)
+}
+
+func (m *MockTokenService) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
+	args := m.Called(ctx, jti)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockTokenService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, requestedScope []string) (*models.Token, error) {
+	args := m.Called(ctx, refreshToken, requestedScope)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
+func (m *MockTokenService) ValidateTokenClaims(ctx context.Context, token *models.Token, validationContext map[string]interface{}) (bool, error) {
+	args := m.Called(ctx, token, validationContext)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockTokenService) IntrospectToken(ctx context.Context, tokenString string, tokenTypeHint string) (*models.TokenIntrospection, error) {
+	args := m.Called(ctx, tokenString, tokenTypeHint)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.TokenIntrospection), args.Error(1)
+}
+
+func (m *MockTokenService) CleanupExpiredTokens(ctx context.Context, before time.Time) (int64, error) {
+	args := m.Called(ctx, before)
+	return args.Get(0).(int64), args.Error(1)
 }
