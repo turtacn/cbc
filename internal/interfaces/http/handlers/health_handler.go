@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/turtacn/cbc/internal/infrastructure/crypto"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
 	"github.com/turtacn/cbc/pkg/logger"
@@ -15,24 +14,21 @@ import (
 
 // HealthHandler 健康检查处理器
 type HealthHandler struct {
-	dbConn      *postgres.DBConnection
-	redisConn   redis.RedisConnectionManager
-	vaultClient *crypto.VaultClient
-	logger      logger.Logger
+	dbConn    *postgres.DBConnection
+	redisConn redis.RedisConnectionManager
+	logger    logger.Logger
 }
 
 // NewHealthHandler 创建健康检查处理器
 func NewHealthHandler(
 	dbConn *postgres.DBConnection,
 	redisConn redis.RedisConnectionManager,
-	vaultClient *crypto.VaultClient,
 	log logger.Logger,
 ) *HealthHandler {
 	return &HealthHandler{
-		dbConn:      dbConn,
-		redisConn:   redisConn,
-		vaultClient: vaultClient,
-		logger:      log,
+		dbConn:    dbConn,
+		redisConn: redisConn,
+		logger:    log,
 	}
 }
 
@@ -41,58 +37,6 @@ type HealthResponse struct {
 	Status    string            `json:"status"`
 	Timestamp time.Time         `json:"timestamp"`
 	Checks    map[string]string `json:"checks"`
-}
-
-// HealthCheck 健康检查端点
-// GET /health
-func (h *HealthHandler) HealthCheck(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	defer cancel()
-
-	checks := make(map[string]string)
-	allHealthy := true
-
-	// 检查数据库连接
-	if err := h.checkDatabase(ctx); err != nil {
-		checks["database"] = "unhealthy: " + err.Error()
-		allHealthy = false
-		h.logger.Error(ctx, "Database health check failed", err)
-	} else {
-		checks["database"] = "ok"
-	}
-
-	// 检查 Redis 连接
-	if err := h.checkRedis(ctx); err != nil {
-		checks["redis"] = "unhealthy: " + err.Error()
-		allHealthy = false
-		h.logger.Error(ctx, "Redis health check failed", err)
-	} else {
-		checks["redis"] = "ok"
-	}
-
-	// 检查 Vault 连接
-	if err := h.checkVault(ctx); err != nil {
-		checks["vault"] = "unhealthy: " + err.Error()
-		allHealthy = false
-		h.logger.Error(ctx, "Vault health check failed", err)
-	} else {
-		checks["vault"] = "ok"
-	}
-
-	status := "healthy"
-	httpStatus := http.StatusOK
-	if !allHealthy {
-		status = "unhealthy"
-		httpStatus = http.StatusServiceUnavailable
-	}
-
-	response := HealthResponse{
-		Status:    status,
-		Timestamp: time.Now().UTC(),
-		Checks:    checks,
-	}
-
-	c.JSON(httpStatus, response)
 }
 
 // ReadinessCheck 就绪检查端点
@@ -117,13 +61,6 @@ func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
 		allReady = false
 	} else {
 		checks["redis"] = "ready"
-	}
-
-	if err := h.checkVault(ctx); err != nil {
-		checks["vault"] = "not ready"
-		allReady = false
-	} else {
-		checks["vault"] = "ready"
 	}
 
 	status := "ready"
@@ -172,25 +109,6 @@ func (h *HealthHandler) checkRedis(ctx context.Context) error {
 	_, err := client.Ping(ctx).Result()
 	if err != nil {
 		return err
-	}
-
-	return nil
-}
-
-// checkVault 检查 Vault 连接
-func (h *HealthHandler) checkVault(ctx context.Context) error {
-	if h.vaultClient == nil {
-		return fmt.Errorf("vault client is nil")
-	}
-
-	// 检查 Vault 健康状态
-	healthy, err := h.vaultClient.Health(ctx)
-	if err != nil {
-		return err
-	}
-
-	if !healthy {
-		return fmt.Errorf("vault is not healthy")
 	}
 
 	return nil

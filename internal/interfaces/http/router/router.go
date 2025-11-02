@@ -20,15 +20,18 @@ import (
 
 // Router HTTP 路由器
 type Router struct {
-	engine        *gin.Engine
-	config        *config.Config
-	logger        logger.Logger
-	healthHandler *handlers.HealthHandler
-	authHandler   *handlers.AuthHandler
-	deviceHandler *handlers.DeviceHandler
-	jwksHandler   *handlers.JWKSHandler
-	authMiddleware gin.HandlerFunc
-	server        *http.Server
+	engine                *gin.Engine
+	config                *config.Config
+	logger                logger.Logger
+	healthHandler         *handlers.HealthHandler
+	authHandler           *handlers.AuthHandler
+	deviceHandler         *handlers.DeviceHandler
+	jwksHandler           *handlers.JWKSHandler
+	authMiddleware        gin.HandlerFunc
+	rateLimitMiddleware   gin.HandlerFunc
+	idempotencyMiddleware gin.HandlerFunc
+	observabilityMiddleware gin.HandlerFunc
+	server                *http.Server
 }
 
 // NewRouter 创建路由器
@@ -40,20 +43,26 @@ func NewRouter(
 	deviceHandler *handlers.DeviceHandler,
 	jwksHandler *handlers.JWKSHandler,
 	authMiddleware gin.HandlerFunc,
+	rateLimitMiddleware gin.HandlerFunc,
+	idempotencyMiddleware gin.HandlerFunc,
+	observabilityMiddleware gin.HandlerFunc,
 ) *Router {
 	// 设置 Gin 模式
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
 	return &Router{
-		engine:        engine,
-		config:        cfg,
-		logger:        log,
-		healthHandler: healthHandler,
-		authHandler:   authHandler,
-		deviceHandler: deviceHandler,
-		jwksHandler:   jwksHandler,
-		authMiddleware: authMiddleware,
+		engine:                engine,
+		config:                cfg,
+		logger:                log,
+		healthHandler:         healthHandler,
+		authHandler:           authHandler,
+		deviceHandler:         deviceHandler,
+		jwksHandler:           jwksHandler,
+		authMiddleware:        authMiddleware,
+		rateLimitMiddleware:   rateLimitMiddleware,
+		idempotencyMiddleware: idempotencyMiddleware,
+		observabilityMiddleware: observabilityMiddleware,
 	}
 }
 
@@ -61,6 +70,7 @@ func NewRouter(
 func (r *Router) SetupRoutes() {
 	// 全局中间件
 	r.engine.Use(gin.Recovery())
+	r.engine.Use(r.observabilityMiddleware)
 
 	// CORS 配置
 	corsConfig := cors.Config{
@@ -84,16 +94,17 @@ func (r *Router) SetupRoutes() {
 	r.engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Pprof 性能分析（仅在非生产环境）
-	if r.config.Monitoring.PprofEnabled {
+	if r.config.Observability.PprofEnabled {
 		pprof.Register(r.engine)
 	}
 
 	// API 路由组
 	v1 := r.engine.Group("/api/v1")
+	v1.Use(r.rateLimitMiddleware)
 	{
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/token", r.authHandler.IssueToken)
+			auth.POST("/token", r.idempotencyMiddleware, r.authHandler.IssueToken)
 			auth.POST("/refresh", r.authHandler.RefreshToken)
 			auth.POST("/revoke", r.authHandler.RevokeToken)
 			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
@@ -101,7 +112,7 @@ func (r *Router) SetupRoutes() {
 		devices := v1.Group("/devices")
 		devices.Use(r.authMiddleware)
 		{
-			devices.POST("", r.deviceHandler.RegisterDevice)
+			devices.POST("", r.idempotencyMiddleware, r.deviceHandler.RegisterDevice)
 			devices.GET("/:device_id", r.deviceHandler.GetDevice)
 			devices.PUT("/:device_id", r.deviceHandler.UpdateDevice)
 		}

@@ -52,9 +52,9 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 	authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
 	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
-	healthHandler := handlers.NewHealthHandler(nil, mockRedis, nil, log)
+	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 
-	r := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil)
+	r := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, nil, nil, nil)
 	r.SetupRoutes()
 	engine := r.Engine()
 

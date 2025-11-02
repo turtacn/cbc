@@ -59,10 +59,10 @@ func Test_HTTP_Auth_Revocation_E2E(t *testing.T) {
 	authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
 	jwksHandler := handlers.NewJWKSHandler(cryptoService, log, metrics) // Use real crypto
-	healthHandler := handlers.NewHealthHandler(nil, nil, nil, log)
+	healthHandler := handlers.NewHealthHandler(nil, nil, log)
 
 	// Setup Router with the REAL JWT middleware for the specific routes
-	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil)
+	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, nil, nil, nil)
 	engine := router.Engine()
 
 	// We manually set up routes to control middleware injection precisely

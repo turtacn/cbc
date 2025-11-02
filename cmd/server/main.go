@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,9 +16,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"go.opentelemetry.io/otel"
 
 	// Adapters
 	cryptoadapter "github.com/turtacn/cbc/internal/adapter/crypto"
@@ -52,62 +56,36 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// ... (constants and Application struct definition remain the same) ...
-
 const (
-	// Service Information
 	ServiceName    = "cbc-auth-service"
 	ServiceVersion = "v1.2.0"
-
-	// Default Ports
 	DefaultHTTPPort = "8080"
 	DefaultGRPCPort = "50051"
-
-	// Graceful Shutdown Timeout
 	ShutdownTimeout = 30 * time.Second
-
-	// Scheduled Task Interval
 	CleanupInterval = 1 * time.Hour
 )
 
-// Application struct holds all application components.
 type Application struct {
 	config *config.Config
 	logger logger.Logger
-
-	// Connections
-	dbConn      *postgres.DBConnection
+	dbConn *postgres.DBConnection
 	redisClient *redisInfra.RedisConnection
-
-	// Infrastructure Components
 	cacheManager *redisInfra.CacheManager
-	keyManager   *crypto.KeyManager // Concrete implementation
-	rateLimiter  *ratelimit.RedisRateLimiter
-
-	// Domain Services (via Adapters)
-	cryptoService    domainService.CryptoService
+	keyManager *crypto.KeyManager
+	rateLimiter *ratelimit.RedisRateLimiter
+	cryptoService domainService.CryptoService
 	rateLimitService domainService.RateLimitService
-	blacklistStore   domainService.TokenBlacklistStore
-
-	// Monitoring
+	blacklistStore domainService.TokenBlacklistStore
 	metrics *monitoring.Metrics
-
-	// Repositories
-	tokenRepo  repository.TokenRepository
+	tokenRepo repository.TokenRepository
 	deviceRepo repository.DeviceRepository
 	tenantRepo repository.TenantRepository
-
-	// Application Services
-	authAppService   service.AuthAppService
+	authAppService service.AuthAppService
 	deviceAppService service.DeviceAppService
 	tenantAppService service.TenantAppService
-
-	// Servers
 	httpServer *http.Server
 	grpcServer *grpc.Server
-
-	// Context for graceful shutdown
-	ctx    context.Context
+	ctx context.Context
 	cancel context.CancelFunc
 }
 
@@ -117,27 +95,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize application: %v\n", err)
 		os.Exit(1)
 	}
-
 	if err := app.Start(); err != nil {
 		app.logger.Error(context.Background(), "Failed to start application", err)
 		os.Exit(1)
 	}
-
 	app.WaitForShutdown()
-
 	if err := app.Shutdown(); err != nil {
 		app.logger.Error(context.Background(), "Failed to shutdown gracefully", err)
 		os.Exit(1)
 	}
 }
 
-// NewApplication creates and initializes a new application instance.
 func NewApplication() (*Application, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-
 	app := &Application{ctx: ctx, cancel: cancel}
-
-	// Sequentially initialize components
 	initSteps := []func() error{
 		app.loadConfig,
 		app.initLogger,
@@ -149,14 +120,12 @@ func NewApplication() (*Application, error) {
 		app.initApplicationServices,
 		app.initInterfaces,
 	}
-
 	for _, step := range initSteps {
 		if err := step(); err != nil {
 			cancel()
 			return nil, err
 		}
 	}
-
 	app.logger.Info(context.Background(), "Application initialized successfully", logger.String("version", ServiceVersion))
 	return app, nil
 }
@@ -171,7 +140,7 @@ func (app *Application) loadConfig() error {
 }
 
 func (app *Application) initLogger() error {
-	app.logger = logger.NewDefaultLogger() // Simplified logger
+	app.logger = logger.NewDefaultLogger()
 	return nil
 }
 
@@ -185,25 +154,22 @@ func (app *Application) initDatabase() error {
 	}
 	app.dbConn = dbConn
 	app.logger.Info(app.ctx, "PostgreSQL connected")
-
-	// Map config.RedisConfig to redis.Config
 	redisCfg := &redisInfra.Config{
-		Mode:         redisInfra.ModeStandalone,
-		Host:         "localhost", // Assuming single node from config.Address
-		Port:         6379,
-		Password:     app.config.Redis.Password,
-		DB:           app.config.Redis.DB,
-		PoolSize:     app.config.Redis.PoolSize,
+		Mode: redisInfra.ModeStandalone,
+		Host: "localhost",
+		Port: 6379,
+		Password: app.config.Redis.Password,
+		DB: app.config.Redis.DB,
+		PoolSize: app.config.Redis.PoolSize,
 		MinIdleConns: app.config.Redis.MinIdleConns,
-		DialTimeout:  app.config.Redis.DialTimeout,
-		ReadTimeout:  app.config.Redis.ReadTimeout,
+		DialTimeout: app.config.Redis.DialTimeout,
+		ReadTimeout: app.config.Redis.ReadTimeout,
 		WriteTimeout: app.config.Redis.WriteTimeout,
 		ClusterAddrs: app.config.Redis.ClusterAddrs,
 	}
 	if app.config.Redis.ClusterEnabled {
 		redisCfg.Mode = redisInfra.ModeCluster
 	}
-
 	redisConn := redisInfra.NewRedisConnection(redisCfg, app.logger)
 	if err := redisConn.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
@@ -218,25 +184,21 @@ func (app *Application) initDatabase() error {
 
 func (app *Application) initInfrastructure() error {
 	app.cacheManager = redisInfra.NewCacheManager(app.redisClient.GetClient(), "cbc:", 1*time.Hour, app.logger)
-
 	km, err := crypto.NewKeyManager(app.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create key manager: %w", err)
 	}
-	app.keyManager = km // Store concrete type
-
+	app.keyManager = km
 	rl, err := ratelimit.NewRedisRateLimiter(app.redisClient.GetClient(), &ratelimit.RateLimiterConfig{}, app.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create rate limiter: %w", err)
 	}
 	app.rateLimiter = rl
-
 	app.logger.Info(app.ctx, "Infrastructure components initialized")
 	return nil
 }
 
 func (app *Application) initDomainServices() error {
-	// Adapters wire infrastructure components to domain interfaces
 	app.cryptoService = cryptoadapter.NewServiceAdapter(app.keyManager, app.logger)
 	app.rateLimitService = &ratelimitadapter.ServiceAdapter{RL: app.rateLimiter}
 	app.blacklistStore = redisStore.NewTokenBlacklistStore(app.redisClient.GetClient().(*redis.Client))
@@ -246,6 +208,11 @@ func (app *Application) initDomainServices() error {
 
 func (app *Application) initMonitoring() error {
 	app.metrics = monitoring.NewMetrics()
+	// Initialize tracer
+	_, err := monitoring.NewTracingManager(app.config, app.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create tracing manager: %w", err)
+	}
 	app.logger.Info(app.ctx, "Monitoring components initialized")
 	return nil
 }
@@ -269,6 +236,11 @@ func (app *Application) initApplicationServices() error {
 }
 
 func (app *Application) initInterfaces() error {
+	tlsConfig, err := app.setupTLSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to setup TLS config: %w", err)
+	}
+
 	// HTTP Server
 	httpPort := fmt.Sprintf(":%d", app.config.Server.HTTPPort)
 	if app.config.Server.HTTPPort == 0 {
@@ -277,13 +249,18 @@ func (app *Application) initInterfaces() error {
 	metricsAdapter := handlers.NewMetricsAdapter(app.metrics)
 	authHandler := handlers.NewAuthHandler(app.authAppService, metricsAdapter, app.logger)
 	deviceHandler := handlers.NewDeviceHandler(app.deviceAppService, metricsAdapter, app.logger)
-	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, nil, app.logger)
-	// 构造 JWKS handler
+	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, app.logger)
 	jwksHandler := handlers.NewJWKSHandler(app.cryptoService, app.logger, metricsAdapter)
+
+	// Middleware
 	authMiddleware := middleware.RequireJWT(app.cryptoService, app.blacklistStore, app.logger)
-	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler, authMiddleware)
+	rateLimitMiddleware := middleware.RateLimitMiddleware(app.rateLimitService, &app.config.RateLimit, app.logger)
+	idempotencyMiddleware := middleware.IdempotencyMiddleware(app.redisClient.GetClient(), &app.config.Idempotency, app.logger)
+	observabilityMiddleware := middleware.ObservabilityMiddleware(otel.Tracer(ServiceName))
+
+	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler, authMiddleware, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
 	router.SetupRoutes()
-	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine()}
+	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine(), TLSConfig: tlsConfig}
 	app.logger.Info(app.ctx, "HTTP interface initialized", logger.String("port", httpPort))
 
 	// gRPC Server
@@ -295,7 +272,11 @@ func (app *Application) initInterfaces() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port: %w", err)
 	}
-	app.grpcServer = grpc.NewServer()
+	var opts []grpc.ServerOption
+	if tlsConfig != nil {
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	}
+	app.grpcServer = grpc.NewServer(opts...)
 	authGRPCService := grpcInterface.NewAuthGRPCService(app.authAppService, app.logger)
 	authpb.RegisterAuthServiceServer(app.grpcServer, authGRPCService)
 	grpc_health_v1.RegisterHealthServer(app.grpcServer, health.NewServer())
@@ -309,22 +290,57 @@ func (app *Application) initInterfaces() error {
 	return nil
 }
 
-// ... (Start, WaitForShutdown, and Shutdown methods remain the same) ...
+func (app *Application) setupTLSConfig() (*tls.Config, error) {
+	if !app.config.Server.TLS.Enabled {
+		return nil, nil
+	}
 
-// Start launches all background services.
+	serverCert, err := tls.LoadX509KeyPair(app.config.Server.TLS.CertFile, app.config.Server.TLS.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load server key pair: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if app.config.Server.TLS.ClientCAFile != "" {
+		caCert, err := os.ReadFile(app.config.Server.TLS.ClientCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read client CA file: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to add client CA's certificate")
+		}
+		tlsConfig.ClientCAs = caCertPool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		app.logger.Info(app.ctx, "mTLS enabled")
+	}
+
+	return tlsConfig, nil
+}
+
 func (app *Application) Start() error {
-	// Start HTTP server
 	go func() {
-		if err := app.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-			app.logger.Fatal(app.ctx, "HTTP server crashed", err)
+		if app.config.Server.TLS.Enabled {
+			app.logger.Info(app.ctx, "Starting HTTPS server")
+			if err := app.httpServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+				app.logger.Fatal(app.ctx, "HTTPS server crashed", err)
+			}
+		} else {
+			app.logger.Info(app.ctx, "Starting HTTP server")
+			if err := app.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+				app.logger.Fatal(app.ctx, "HTTP server crashed", err)
+			}
 		}
 	}()
 
-	// Start Prometheus metrics server
 	go func() {
 		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		if err := http.ListenAndServe(":9090", mux); err != http.ErrServerClosed {
+		mux.Handle(app.config.Observability.MetricsEndpoint, promhttp.Handler())
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", app.config.Observability.PrometheusPort), mux); err != http.ErrServerClosed {
 			app.logger.Error(app.ctx, "Metrics server crashed", err)
 		}
 	}()
@@ -332,7 +348,6 @@ func (app *Application) Start() error {
 	return nil
 }
 
-// WaitForShutdown blocks until a shutdown signal is received.
 func (app *Application) WaitForShutdown() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -340,19 +355,16 @@ func (app *Application) WaitForShutdown() {
 	app.logger.Info(app.ctx, "Shutdown signal received")
 }
 
-// Shutdown gracefully stops all application services.
 func (app *Application) Shutdown() error {
 	app.logger.Info(app.ctx, "Shutting down application...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 
-	// Stop servers
 	if err := app.httpServer.Shutdown(shutdownCtx); err != nil {
 		app.logger.Error(shutdownCtx, "HTTP server shutdown error", err)
 	}
 	app.grpcServer.GracefulStop()
 
-	// Close connections
 	if app.dbConn != nil {
 		app.dbConn.Close()
 	}

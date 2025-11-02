@@ -45,10 +45,10 @@ func TestAuthHttpSanity(t *testing.T) {
 	authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
 	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
-	healthHandler := handlers.NewHealthHandler(nil, mockRedis, nil, log)
+	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 
 	// Setup router
-	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil)
+	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, nil, nil, nil)
 	router.SetupRoutes()
 	engine := router.Engine()
 
