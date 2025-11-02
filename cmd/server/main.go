@@ -269,10 +269,13 @@ func (app *Application) initInterfaces() error {
 	if app.config.Server.HTTPPort == 0 {
 		httpPort = ":" + DefaultHTTPPort
 	}
-	authHandler := handlers.NewAuthHandler(app.authAppService, nil, app.logger)
-	deviceHandler := handlers.NewDeviceHandler(app.deviceAppService, nil, app.logger)
+	metricsAdapter := handlers.NewMetricsAdapter(app.metrics)
+	authHandler := handlers.NewAuthHandler(app.authAppService, metricsAdapter, app.logger)
+	deviceHandler := handlers.NewDeviceHandler(app.deviceAppService, metricsAdapter, app.logger)
 	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, nil, app.logger)
-	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler)
+	// 构造 JWKS handler
+	jwksHandler := handlers.NewJWKSHandler(app.cryptoService, app.logger, metricsAdapter)
+	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler)
 	router.SetupRoutes()
 	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine()}
 	app.logger.Info(app.ctx, "HTTP interface initialized", logger.String("port", httpPort))

@@ -100,6 +100,55 @@ func (h *AuthHandler) RegisterDevice(c *gin.Context) {
 	c.JSON(http.StatusCreated, response)
 }
 
+// RefreshToken 刷新 Token
+// POST /api/v1/auth/refresh
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	h.metrics.RecordRequestStart(c.Request.Context(), "refresh_token")
+
+	var req dto.TokenRefreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.handleAuthError(c, errors.ErrInvalidRequest(err.Error()), "refresh_token")
+		return
+	}
+	if verr := utils.ValidateStruct(&req); verr != nil {
+		h.handleAuthError(c, errors.ErrInvalidRequest(verr.Error()), "refresh_token")
+		return
+	}
+
+	resp, err := h.authService.RefreshToken(c.Request.Context(), &req)
+	if err != nil {
+		h.handleAuthError(c, err, "refresh_token")
+		return
+	}
+
+	h.metrics.RecordRequestDuration(c.Request.Context(), "refresh_token", http.StatusOK, 0)
+	c.JSON(http.StatusOK, resp)
+}
+
+// RevokeToken 撤销 Token
+// POST /api/v1/auth/revoke
+func (h *AuthHandler) RevokeToken(c *gin.Context) {
+	h.metrics.RecordRequestStart(c.Request.Context(), "revoke_token")
+
+	var req dto.TokenRevokeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.handleAuthError(c, errors.ErrInvalidRequest(err.Error()), "revoke_token")
+		return
+	}
+	if verr := utils.ValidateStruct(&req); verr != nil {
+		h.handleAuthError(c, errors.ErrInvalidRequest(verr.Error()), "revoke_token")
+		return
+	}
+
+	if err := h.authService.RevokeToken(c.Request.Context(), &req); err != nil {
+		h.handleAuthError(c, err, "revoke_token")
+		return
+	}
+
+	h.metrics.RecordRequestDuration(c.Request.Context(), "revoke_token", http.StatusNoContent, 0)
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
 // handleAuthError 统一处理认证错误
 func (h *AuthHandler) handleAuthError(c *gin.Context, err error, operation string) {
 	cbcErr, ok := errors.AsCBCError(err)

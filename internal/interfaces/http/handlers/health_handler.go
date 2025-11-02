@@ -16,7 +16,7 @@ import (
 // HealthHandler 健康检查处理器
 type HealthHandler struct {
 	dbConn      *postgres.DBConnection
-	redisConn   *redis.RedisConnection
+	redisConn   redis.RedisConnectionManager
 	vaultClient *crypto.VaultClient
 	logger      logger.Logger
 }
@@ -24,7 +24,7 @@ type HealthHandler struct {
 // NewHealthHandler 创建健康检查处理器
 func NewHealthHandler(
 	dbConn *postgres.DBConnection,
-	redisConn *redis.RedisConnection,
+	redisConn redis.RedisConnectionManager,
 	vaultClient *crypto.VaultClient,
 	log logger.Logger,
 ) *HealthHandler {

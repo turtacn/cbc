@@ -20,13 +20,14 @@ import (
 
 // Router HTTP 路由器
 type Router struct {
-	engine         *gin.Engine
-	config         *config.Config
-	logger         logger.Logger
-	healthHandler  *handlers.HealthHandler
-	authHandler    *handlers.AuthHandler
-	deviceHandler  *handlers.DeviceHandler
-	server         *http.Server
+	engine        *gin.Engine
+	config        *config.Config
+	logger        logger.Logger
+	healthHandler *handlers.HealthHandler
+	authHandler   *handlers.AuthHandler
+	deviceHandler *handlers.DeviceHandler
+	jwksHandler   *handlers.JWKSHandler
+	server        *http.Server
 }
 
 // NewRouter 创建路由器
@@ -36,18 +37,20 @@ func NewRouter(
 	healthHandler *handlers.HealthHandler,
 	authHandler *handlers.AuthHandler,
 	deviceHandler *handlers.DeviceHandler,
+	jwksHandler *handlers.JWKSHandler,
 ) *Router {
 	// 设置 Gin 模式
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
 	return &Router{
-		engine:         engine,
-		config:         cfg,
-		logger:         log,
-		healthHandler:  healthHandler,
-		authHandler:    authHandler,
-		deviceHandler:  deviceHandler,
+		engine:        engine,
+		config:        cfg,
+		logger:        log,
+		healthHandler: healthHandler,
+		authHandler:   authHandler,
+		deviceHandler: deviceHandler,
+		jwksHandler:   jwksHandler,
 	}
 }
 
@@ -68,9 +71,11 @@ func (r *Router) SetupRoutes() {
 	r.engine.Use(cors.New(corsConfig))
 
 	// 健康检查路由（不需要认证）
-	r.engine.GET("/health", r.healthHandler.HealthCheck)
-	r.engine.GET("/ready", r.healthHandler.ReadinessCheck)
+	r.engine.GET("/health/live", r.healthHandler.LivenessCheck)
+	r.engine.GET("/health/ready", r.healthHandler.ReadinessCheck)
+	// 兼容旧路径（过渡期）
 	r.engine.GET("/live", r.healthHandler.LivenessCheck)
+	r.engine.GET("/ready", r.healthHandler.ReadinessCheck)
 
 	// Prometheus metrics
 	r.engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
@@ -83,11 +88,18 @@ func (r *Router) SetupRoutes() {
 	// API 路由组
 	v1 := r.engine.Group("/api/v1")
 	{
-		// 认证相关路由
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/register-device", r.authHandler.RegisterDevice)
 			auth.POST("/token", r.authHandler.IssueToken)
+			auth.POST("/refresh", r.authHandler.RefreshToken)
+			auth.POST("/revoke", r.authHandler.RevokeToken)
+			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
+		}
+		devices := v1.Group("/devices")
+		{
+			devices.POST("", r.deviceHandler.RegisterDevice)
+			devices.GET("/:device_id", r.deviceHandler.GetDevice)
+			devices.PUT("/:device_id", r.deviceHandler.UpdateDevice)
 		}
 	}
 

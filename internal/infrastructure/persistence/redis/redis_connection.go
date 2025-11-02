@@ -13,6 +13,8 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
+var _ RedisConnectionManager = (*RedisConnection)(nil)
+
 // ConnectionMode defines Redis deployment mode
 type ConnectionMode string
 
@@ -342,13 +344,13 @@ func (rc *RedisConnection) setDefaults() {
 }
 
 // GetClient returns the Redis client instance.
-// It panics if connection is not initialized.
+// It returns nil if connection is not initialized.
 //
 // Returns:
 //   - redis.UniversalClient: Redis client instance
 func (rc *RedisConnection) GetClient() redis.UniversalClient {
 	if !rc.isInitialized {
-		panic("Redis connection not initialized")
+		return nil
 	}
 	return rc.client
 }

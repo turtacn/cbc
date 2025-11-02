@@ -296,8 +296,12 @@ func ErrAgentNotFound(agentID string) CBCError {
 
 // ErrDeviceNotFound creates a device not found error
 func ErrDeviceNotFound(deviceID string) CBCError {
-	return ErrInvalidGrant(fmt.Sprintf("Device not found: %s", deviceID)).
-		WithMetadata("device_id", deviceID)
+	return NewError(
+		ErrCodeNotFound,
+		http.StatusNotFound,
+		"Device not found",
+		fmt.Sprintf("Device not found: %s", deviceID),
+	).WithMetadata("device_id", deviceID)
 }
 
 // ErrDeviceUntrusted creates a device untrusted error

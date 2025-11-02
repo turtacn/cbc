@@ -4,8 +4,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -16,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,6 +29,7 @@ import (
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	http_router "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
+	"github.com/turtacn/cbc/tests/mocks"
 	gormPostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -84,19 +82,21 @@ func (s *AuthE2ESuite) SetupSuite() {
 	tenantRepo := postgres_infra.NewTenantRepository(s.db, log)
 	tokenRepo := postgres_infra.NewTokenRepository(s.db, log)
 
-	keyManager := &MockKeyManager{}
-	rateLimiter := &MockRateLimitService{}
+	keyManager := &mocks.MockCryptoService{}
+	rateLimiter := &mocks.MockRateLimitService{}
 	rateLimiter.On("Allow", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(true, 0, time.Time{}, nil)
 
 	tokenService := domain_service.NewTokenDomainService(tokenRepo, keyManager, log)
 	authAppService := app_service.NewAuthAppService(tokenService, deviceRepo, tenantRepo, rateLimiter, log)
 	deviceAppService := app_service.NewDeviceAppService(deviceRepo, log)
 
-	authHandler := handlers.NewAuthHandler(authAppService, nil, log)
-	deviceHandler := handlers.NewDeviceHandler(deviceAppService, nil, log)
+	metrics := &mocks.MockHTTPMetrics{}
+	authHandler := handlers.NewAuthHandler(authAppService, metrics, log)
+	deviceHandler := handlers.NewDeviceHandler(deviceAppService, metrics, log)
 	healthHandler := handlers.NewHealthHandler(nil, nil, nil, log)
+	jwksHandler := handlers.NewJWKSHandler(keyManager, log, metrics)
 
-	router := http_router.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler)
+	router := http_router.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler)
 	router.SetupRoutes()
 	s.router = router.Engine()
 }
@@ -121,25 +121,25 @@ func (s *AuthE2ESuite) TestFullAuthFlow() {
 		DeviceFingerprint: "e2e-fingerprint",
 	}
 	regJsonBody, _ := json.Marshal(regReqBody)
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/register-device", bytes.NewBuffer(regJsonBody))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/devices", bytes.NewBuffer(regJsonBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 
 	assert.Equal(s.T(), http.StatusCreated, w.Code)
-	var regResp dto.TokenResponse
+	var regResp dto.DeviceResponse
 	err := json.Unmarshal(w.Body.Bytes(), &regResp)
 	assert.NoError(s.T(), err)
-	assert.NotEmpty(s.T(), regResp.RefreshToken)
-	refreshToken := regResp.RefreshToken
+	assert.Equal(s.T(), deviceID, regResp.AgentID)
 
-	// 2. Issue Token using Refresh Token
-	tokenReqBody := dto.RefreshTokenRequest{
-		RefreshToken: refreshToken,
+	// 2. Issue Token
+	issueReqBody := dto.IssueTokenRequest{
+		TenantID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		AgentID:  deviceID,
 	}
-	tokenJsonBody, _ := json.Marshal(tokenReqBody)
-	req, _ = http.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewBuffer(tokenJsonBody))
+	issueJsonBody, _ := json.Marshal(issueReqBody)
+	req, _ = http.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewBuffer(issueJsonBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	w = httptest.NewRecorder()
@@ -155,52 +155,4 @@ func (s *AuthE2ESuite) TestFullAuthFlow() {
 
 func TestAuthE2ESuite(t *testing.T) {
 	suite.Run(t, new(AuthE2ESuite))
-}
-
-type MockKeyManager struct {
-	mock.Mock
-}
-
-func (m *MockKeyManager) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
-	args := m.Called(ctx, tenantID, claims)
-	return args.String(0), args.String(1), args.Error(2)
-}
-
-func (m *MockKeyManager) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
-	args := m.Called(ctx, tokenString, tenantID)
-	return args.Get(0).(jwt.MapClaims), args.Error(1)
-}
-
-func (m *MockKeyManager) GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error) {
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	return privateKey, "test-kid", nil
-}
-
-func (m *MockKeyManager) GetPublicKey(ctx context.Context, tenantID, kid string) (*rsa.PublicKey, error) {
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	return &privateKey.PublicKey, nil
-}
-
-func (m *MockKeyManager) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockKeyManager) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockKeyManager) RotateKey(ctx context.Context, tenantID string) (string, error) {
-	args := m.Called(ctx, tenantID)
-	return args.String(0), args.Error(1)
-}
-
-type MockRateLimitService struct {
-	mock.Mock
-}
-
-func (m *MockRateLimitService) Allow(ctx context.Context, dimension domain_service.RateLimitDimension, key, action string) (bool, int, time.Time, error) {
-	args := m.Called(ctx, dimension, key, action)
-	return args.Bool(0), args.Int(1), args.Get(2).(time.Time), args.Error(3)
 }

@@ -164,6 +164,23 @@ func NewDefaultLogger() Logger {
 	return NewLogger(constants.LogLevelInfo, os.Stdout)
 }
 
+// NewNoopLogger creates a logger that does nothing.
+func NewNoopLogger() Logger {
+	return &noopLogger{}
+}
+
+type noopLogger struct{}
+
+func (n *noopLogger) Debug(ctx context.Context, message string, fields ...Field) {}
+func (n *noopLogger) Info(ctx context.Context, message string, fields ...Field)  {}
+func (n *noopLogger) Warn(ctx context.Context, message string, fields ...Field)  {}
+func (n *noopLogger) Error(ctx context.Context, message string, err error, fields ...Field) {}
+func (n *noopLogger) Fatal(ctx context.Context, message string, err error, fields ...Field) {}
+func (n *noopLogger) WithFields(fields ...Field) Logger                            { return n }
+func (n *noopLogger) WithComponent(component string) Logger                      { return n }
+func (n *noopLogger) SetLevel(level constants.LogLevel)                          {}
+func (n *noopLogger) GetLevel() constants.LogLevel                               { return constants.LogLevelInfo }
+
 // ================================================================================
 // Core Logging Methods
 // ================================================================================

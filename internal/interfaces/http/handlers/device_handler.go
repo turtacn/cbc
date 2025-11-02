@@ -66,6 +66,43 @@ func (h *DeviceHandler) RegisterDevice(c *gin.Context) {
 	c.JSON(http.StatusCreated, response)
 }
 
+// GetDevice 获取设备信息
+// GET /api/v1/devices/:device_id
+func (h *DeviceHandler) GetDevice(c *gin.Context) {
+	deviceID := c.Param("device_id")
+	if deviceID == "" {
+		h.handleDeviceError(c, errors.ErrInvalidRequest("device_id required"), "get_device")
+		return
+	}
+	resp, err := h.deviceService.GetDeviceInfo(c.Request.Context(), deviceID)
+	if err != nil {
+		h.handleDeviceError(c, err, "get_device")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// UpdateDevice 更新设备信息
+// PUT /i/v1/devices/:device_id
+func (h *DeviceHandler) UpdateDevice(c *gin.Context) {
+	deviceID := c.Param("device_id")
+	var req dto.DeviceUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.handleDeviceError(c, errors.ErrInvalidRequest(err.Error()), "update_device")
+		return
+	}
+	req.AgentID = deviceID
+	if verr := utils.ValidateStruct(&req); verr != nil {
+		h.handleDeviceError(c, errors.ErrInvalidRequest(verr.Error()), "update_device")
+		return
+	}
+	if _, err := h.deviceService.UpdateDeviceInfo(c.Request.Context(), deviceID, &req); err != nil {
+		h.handleDeviceError(c, err, "update_device")
+		return
+	}
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
 // handleDeviceError 统一处理设备错误
 func (h *DeviceHandler) handleDeviceError(c *gin.Context, err error, operation string) {
 	cbcErr, ok := errors.AsCBCError(err)

@@ -118,7 +118,7 @@ func TestRedisRateLimiter_AllowWithExpiration(t *testing.T) {
 // TestRedisRateLimiter_ResetLimit verifies resetting the rate limit
 func TestRedisRateLimiter_ResetLimit(t *testing.T) {
 	client := setup(t)
-	log := logger.NewDefaultLogger()
+	log := logger.NewNoopLogger()
 	config := DefaultRateLimiterConfig()
 	config.DefaultLimit = 1
 	limiter, err := NewRedisRateLimiter(client, config, log)
@@ -130,12 +130,12 @@ func TestRedisRateLimiter_ResetLimit(t *testing.T) {
 	// Exhaust the limit
 	allowed, _, _, err := limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	require.True(t, allowed)
+	assert.True(t, allowed, "first request should be allowed")
 
 	// 2nd request should be denied
 	allowed, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	assert.False(t, allowed)
+	assert.False(t, allowed, "second request should be denied")
 
 	// Reset the limit
 	err = limiter.ResetLimit(ctx, service.RateLimitDimensionUser, key, "default")
@@ -144,5 +144,5 @@ func TestRedisRateLimiter_ResetLimit(t *testing.T) {
 	// Next request should be allowed
 	allowed, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
-	assert.True(t, allowed)
+	assert.True(t, allowed, "request after reset should be allowed")
 }
