@@ -224,6 +224,8 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
 				mockRepo.On("FindByJTI", ctx, jti).Return(token, nil).Once()
 				mockRepo.On("IsRevoked", ctx, jti).Return(false, nil).Once()
+				mockCrypto.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-access-token", "new-key-id", nil).Once()
+				mockCrypto.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-refresh-token", "new-key-id", nil).Once()
 				mockRepo.On("Revoke", ctx, jti, "rotated").Return(nil).Once()
 				mockRepo.On("Save", ctx, mock.AnythingOfType("*models.Token")).Return(nil).Once()
 			},

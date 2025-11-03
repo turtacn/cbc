@@ -15,7 +15,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/turtacn/cbc/internal/config"
-	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
+	infra_postgres "github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/pkg/logger"
@@ -35,7 +35,8 @@ func TestHealthCheckIntegration(t *testing.T) {
 		postgres.WithDatabase("test-db"),
 		postgres.WithUsername("user"),
 		postgres.WithPassword("password"),
-		wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(5*time.Second),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(5*time.Second)),
 	)
 	require.NoError(t, err)
 	defer pgContainer.Terminate(ctx)
@@ -43,15 +44,17 @@ func TestHealthCheckIntegration(t *testing.T) {
 	pgConnStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	dbConn, err := postgres.NewDBConnection(ctx, &config.DatabaseConfig{DSN: pgConnStr}, log)
+	dbConn, err := infra_postgres.NewDBConnection(ctx, &config.DatabaseConfig{DSN: pgConnStr}, log)
 	require.NoError(t, err)
 
 	// Redis container
 	redisContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "redis:6-alpine",
+			ExposedPorts: []string{"6379/tcp"},
+			WaitingFor:   wait.ForLog("* Ready to accept connections"),
+		},
 		Started: true,
-		Image:   "redis:6-alpine",
-		ExposedPorts: []string{"6379/tcp"},
-		WaitingFor: wait.ForLog("* Ready to accept connections"),
 	})
 	require.NoError(t, err)
 	defer redisContainer.Terminate(ctx)

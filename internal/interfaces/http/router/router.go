@@ -100,11 +100,12 @@ func (r *Router) SetupRoutes() {
 
 	// API 路由组
 	v1 := r.engine.Group("/api/v1")
+	v1.Use(r.idempotencyMiddleware)
 	v1.Use(r.rateLimitMiddleware)
 	{
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/token", r.idempotencyMiddleware, r.authHandler.IssueToken)
+			auth.POST("/token", r.authHandler.IssueToken)
 			auth.POST("/refresh", r.authHandler.RefreshToken)
 			auth.POST("/revoke", r.authHandler.RevokeToken)
 			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
@@ -112,7 +113,7 @@ func (r *Router) SetupRoutes() {
 		devices := v1.Group("/devices")
 		devices.Use(r.authMiddleware)
 		{
-			devices.POST("", r.idempotencyMiddleware, r.deviceHandler.RegisterDevice)
+			devices.POST("", r.deviceHandler.RegisterDevice)
 			devices.GET("/:device_id", r.deviceHandler.GetDevice)
 			devices.PUT("/:device_id", r.deviceHandler.UpdateDevice)
 		}

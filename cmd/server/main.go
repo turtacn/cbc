@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -21,9 +22,9 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"go.opentelemetry.io/otel"
+	"github.com/hashicorp/vault/api"
 
 	// Adapters
-	cryptoadapter "github.com/turtacn/cbc/internal/adapter/crypto"
 	ratelimitadapter "github.com/turtacn/cbc/internal/adapter/ratelimit"
 
 	// Application Layer
@@ -37,7 +38,9 @@ import (
 	domainService "github.com/turtacn/cbc/internal/domain/service"
 
 	// Infrastructure Layer
+	"github.com/turtacn/cbc/internal/infrastructure/audit"
 	"github.com/turtacn/cbc/internal/infrastructure/crypto"
+	"github.com/turtacn/cbc/internal/infrastructure/kms"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
 	redisInfra "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
@@ -73,6 +76,8 @@ type Application struct {
 	cacheManager *redisInfra.CacheManager
 	keyManager *crypto.KeyManager
 	rateLimiter *ratelimit.RedisRateLimiter
+	vaultClient *api.Client
+	auditService domainService.AuditService
 	cryptoService domainService.CryptoService
 	rateLimitService domainService.RateLimitService
 	blacklistStore domainService.TokenBlacklistStore
@@ -113,6 +118,7 @@ func NewApplication() (*Application, error) {
 		app.loadConfig,
 		app.initLogger,
 		app.initDatabase,
+		app.initVault,
 		app.initInfrastructure,
 		app.initDomainServices,
 		app.initMonitoring,
@@ -182,6 +188,21 @@ func (app *Application) initDatabase() error {
 	return nil
 }
 
+func (app *Application) initVault() error {
+	vaultConfig := api.DefaultConfig()
+	vaultConfig.Address = app.config.Vault.Address
+	vaultConfig.Timeout = app.config.Vault.Timeout
+
+	client, err := api.NewClient(vaultConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create vault client: %w", err)
+	}
+	client.SetToken(app.config.Vault.Token)
+	app.vaultClient = client
+	app.logger.Info(app.ctx, "Vault client initialized")
+	return nil
+}
+
 func (app *Application) initInfrastructure() error {
 	app.cacheManager = redisInfra.NewCacheManager(app.redisClient.GetClient(), "cbc:", 1*time.Hour, app.logger)
 	km, err := crypto.NewKeyManager(app.logger)
@@ -199,15 +220,30 @@ func (app *Application) initInfrastructure() error {
 }
 
 func (app *Application) initDomainServices() error {
-	app.cryptoService = cryptoadapter.NewServiceAdapter(app.keyManager, app.logger)
+	var err error
+	redisClient, ok := app.redisClient.GetClient().(*redis.Client)
+    if !ok {
+        return fmt.Errorf("unexpected redis client type: %T", app.redisClient.GetClient())
+    }
+
+	app.cryptoService, err = kms.NewVaultAdapter(app.config.Vault, app.vaultClient, redisClient, app.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create vault adapter: %w", err)
+	}
+
+	app.auditService, err = audit.NewKafkaProducer(app.config.Kafka, app.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create kafka producer: %w", err)
+	}
+
 	app.rateLimitService = &ratelimitadapter.ServiceAdapter{RL: app.rateLimiter}
-	app.blacklistStore = redisStore.NewTokenBlacklistStore(app.redisClient.GetClient().(*redis.Client))
+	app.blacklistStore = redisStore.NewTokenBlacklistStore(redisClient)
 	app.logger.Info(app.ctx, "Domain services initialized via adapters")
 	return nil
 }
 
 func (app *Application) initMonitoring() error {
-	app.metrics = monitoring.NewMetrics()
+	app.metrics = monitoring.NewMetrics(prometheus.DefaultRegisterer)
 	// Initialize tracer
 	_, err := monitoring.NewTracingManager(app.config, app.logger)
 	if err != nil {
@@ -228,8 +264,8 @@ func (app *Application) initRepositories() error {
 
 func (app *Application) initApplicationServices() error {
 	tokenDomainService := domainService.NewTokenDomainService(app.tokenRepo, app.cryptoService, app.logger)
-	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.logger)
-	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.logger)
+	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
+	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.cryptoService, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
 	return nil

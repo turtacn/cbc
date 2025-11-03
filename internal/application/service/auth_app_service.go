@@ -41,6 +41,7 @@ type authAppServiceImpl struct {
 	tenantRepo        repository.TenantRepository
 	rateLimitService  domainService.RateLimitService
 	blacklist         domainService.TokenBlacklistStore
+	auditService      domainService.AuditService
 	logger            logger.Logger
 }
 
@@ -51,6 +52,7 @@ func NewAuthAppService(
 	tenantRepo repository.TenantRepository,
 	rateLimitService domainService.RateLimitService,
 	blacklist domainService.TokenBlacklistStore,
+	auditService domainService.AuditService,
 	log logger.Logger,
 ) AuthAppService {
 	return &authAppServiceImpl{
@@ -59,6 +61,7 @@ func NewAuthAppService(
 		tenantRepo:       tenantRepo,
 		rateLimitService: rateLimitService,
 		blacklist:        blacklist,
+		auditService:     auditService,
 		logger:           log,
 	}
 }
@@ -133,6 +136,12 @@ func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regist
 			return nil, errors.ErrServerError("failed to create device").WithCause(err)
 		}
 		s.logger.Info(ctx, "New device registered successfully", logger.String("agent_id", req.AgentID))
+		s.auditService.LogEvent(ctx, models.AuditEvent{
+			EventType: "device.register",
+			TenantID:  req.TenantID,
+			DeviceID:  req.AgentID,
+			Success:   true,
+		})
 	}
 
 	// 6. Issue token pair
@@ -222,6 +231,12 @@ func (s *authAppServiceImpl) IssueToken(ctx context.Context, req *dto.IssueToken
 	}
 
 	// Record audit log
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "token.issue",
+		TenantID:  req.TenantID,
+		DeviceID:  req.AgentID,
+		Success:   true,
+	})
 	s.logger.Info(ctx, "Token issuance successful",
 		logger.String("tenant_id", req.TenantID),
 		logger.String("agent_id", req.AgentID),
@@ -301,6 +316,13 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 	}
 
 	// Record audit log
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "token.refresh",
+		TenantID:  refreshToken.TenantID,
+		DeviceID:  refreshToken.DeviceID,
+		Success:   true,
+		Details:   fmt.Sprintf("Old JTI: %s", refreshToken.JTI),
+	})
 	s.logger.Info(ctx, "Token refresh successful",
 		logger.String("tenant_id", refreshToken.TenantID),
 		logger.String("agent_id", refreshToken.DeviceID),
@@ -340,6 +362,13 @@ func (s *authAppServiceImpl) RevokeToken(ctx context.Context, req *dto.RevokeTok
 	}
 
 	// Record audit log
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "token.revoke",
+		TenantID:  token.TenantID,
+		DeviceID:  token.DeviceID,
+		Success:   true,
+		Details:   fmt.Sprintf("JTI: %s, Reason: %s", token.JTI, req.Reason),
+	})
 	s.logger.Info(ctx, "Token revocation successful",
 		logger.String("tenant_id", token.TenantID),
 		logger.String("agent_id", token.DeviceID),

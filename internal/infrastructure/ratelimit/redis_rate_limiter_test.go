@@ -141,6 +141,12 @@ func TestRedisRateLimiter_ResetLimit(t *testing.T) {
 	err = limiter.ResetLimit(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)
 
+	// Verify key is deleted
+	redisKey := fmt.Sprintf("ratelimit:%s:%s:%s", service.RateLimitDimensionUser, key, "default")
+	exists, err := client.Exists(ctx, redisKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), exists, "redis key should be deleted after reset")
+
 	// Next request should be allowed
 	allowed, _, _, err = limiter.Allow(ctx, service.RateLimitDimensionUser, key, "default")
 	require.NoError(t, err)

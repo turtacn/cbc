@@ -12,6 +12,7 @@ import (
 
 // Metrics 定义所有业务指标
 type Metrics struct {
+	reg prometheus.Registerer
 	// Token 相关指标
 	TokenIssueRequests   *prometheus.CounterVec
 	TokenIssueSuccess    *prometheus.CounterVec
@@ -47,10 +48,15 @@ type Metrics struct {
 }
 
 // NewMetrics 创建并注册所有指标
-func NewMetrics() *Metrics {
+func NewMetrics(reg prometheus.Registerer) *Metrics {
+	if reg == nil {
+		reg = prometheus.DefaultRegisterer
+	}
+	factory := promauto.With(reg)
 	metrics := &Metrics{
+		reg: reg,
 		// Token 指标
-		TokenIssueRequests: promauto.NewCounterVec(
+		TokenIssueRequests: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_issue_requests_total",
 				Help: "Total number of token issue requests",
@@ -58,7 +64,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id", "grant_type"},
 		),
 
-		TokenIssueSuccess: promauto.NewCounterVec(
+		TokenIssueSuccess: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_issue_success_total",
 				Help: "Total number of successful token issues",
@@ -66,7 +72,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id", "grant_type"},
 		),
 
-		TokenIssueFailure: promauto.NewCounterVec(
+		TokenIssueFailure: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_issue_failure_total",
 				Help: "Total number of failed token issues",
@@ -74,7 +80,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id", "grant_type", "error_code"},
 		),
 
-		TokenIssueLatency: promauto.NewHistogramVec(
+		TokenIssueLatency: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "cbc_auth_token_issue_latency_seconds",
 				Help:    "Latency distribution of token issuance",
@@ -83,7 +89,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id"},
 		),
 
-		TokenVerifyRequests: promauto.NewCounterVec(
+		TokenVerifyRequests: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_verify_requests_total",
 				Help: "Total number of token verification requests",
@@ -91,7 +97,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id"},
 		),
 
-		TokenVerifySuccess: promauto.NewCounterVec(
+		TokenVerifySuccess: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_verify_success_total",
 				Help: "Total number of successful token verifications",
@@ -99,7 +105,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id"},
 		),
 
-		TokenVerifyFailure: promauto.NewCounterVec(
+		TokenVerifyFailure: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_verify_failure_total",
 				Help: "Total number of failed token verifications",
@@ -107,7 +113,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id", "error_code"},
 		),
 
-		TokenRevokeTotal: promauto.NewCounterVec(
+		TokenRevokeTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_token_revoke_total",
 				Help: "Total number of token revocations",
@@ -116,7 +122,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// Device 指标
-		DeviceRegisterRequests: promauto.NewCounterVec(
+		DeviceRegisterRequests: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_device_register_requests_total",
 				Help: "Total number of device registration requests",
@@ -124,7 +130,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id"},
 		),
 
-		DeviceRegisterSuccess: promauto.NewCounterVec(
+		DeviceRegisterSuccess: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_device_register_success_total",
 				Help: "Total number of successful device registrations",
@@ -132,7 +138,7 @@ func NewMetrics() *Metrics {
 			[]string{"tenant_id"},
 		),
 
-		DeviceRegisterFailure: promauto.NewCounterVec(
+		DeviceRegisterFailure: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_device_register_failure_total",
 				Help: "Total number of failed device registrations",
@@ -141,7 +147,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// Rate Limit 指标
-		RateLimitHits: promauto.NewCounterVec(
+		RateLimitHits: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_rate_limit_hits_total",
 				Help: "Total number of rate limit hits",
@@ -150,7 +156,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// Cache 指标
-		CacheHits: promauto.NewCounterVec(
+		CacheHits: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_cache_hits_total",
 				Help: "Total number of cache hits",
@@ -158,7 +164,7 @@ func NewMetrics() *Metrics {
 			[]string{"cache_type"},
 		),
 
-		CacheMisses: promauto.NewCounterVec(
+		CacheMisses: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_cache_misses_total",
 				Help: "Total number of cache misses",
@@ -167,7 +173,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// Database 指标
-		DBQueryDuration: promauto.NewHistogramVec(
+		DBQueryDuration: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "cbc_auth_db_query_duration_seconds",
 				Help:    "Database query duration",
@@ -176,7 +182,7 @@ func NewMetrics() *Metrics {
 			[]string{"operation"},
 		),
 
-		DBConnections: promauto.NewGaugeVec(
+		DBConnections: factory.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "cbc_auth_db_connections",
 				Help: "Current number of database connections",
@@ -185,7 +191,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// Vault 指标
-		VaultAPILatency: promauto.NewHistogramVec(
+		VaultAPILatency: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "cbc_auth_vault_api_latency_seconds",
 				Help:    "Vault API call latency",
@@ -194,7 +200,7 @@ func NewMetrics() *Metrics {
 			[]string{"operation"},
 		),
 
-		VaultAPIErrors: promauto.NewCounterVec(
+		VaultAPIErrors: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "cbc_auth_vault_api_errors_total",
 				Help: "Total number of Vault API errors",
@@ -203,7 +209,7 @@ func NewMetrics() *Metrics {
 		),
 
 		// System 指标
-		GoroutineCount: promauto.NewGauge(
+		GoroutineCount: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "cbc_auth_goroutine_count",
 				Help: "Current number of goroutines",

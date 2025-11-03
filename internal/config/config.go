@@ -19,6 +19,19 @@ type Config struct {
 	Idempotency   IdempotencyConfig   `mapstructure:"idempotency"`
 	Log           LogConfig           `mapstructure:"log"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
+	Kafka         KafkaConfig         `mapstructure:"kafka"`
+}
+
+// KafkaConfig holds Kafka settings for the audit producer.
+type KafkaConfig struct {
+	Brokers       []string      `mapstructure:"brokers" env:"CBC_AUTH_KAFKA_BROKERS" default:"localhost:9092"`
+	AuditTopic    string        `mapstructure:"audit_topic" env:"CBC_AUTH_KAFKA_AUDIT_TOPIC" default:"cbc-audit-logs"`
+	WriteTimeout  time.Duration `mapstructure:"write_timeout" env:"CBC_AUTH_KAFKA_WRITE_TIMEOUT" default:"10s"`
+	ReadTimeout   time.Duration `mapstructure:"read_timeout" env:"CBC_AUTH_KAFKA_READ_TIMEOUT" default:"10s"`
+	RequiredAcks  int           `mapstructure:"required_acks" env:"CBC_AUTH_KAFKA_REQUIRED_ACKS" default:"-1"` // -1 for all ISRs
+	MaxMessageBytes int         `mapstructure:"max_message_bytes" env:"CBC_AUTH_KAFKA_MAX_MESSAGE_BYTES" default:"1048576"`
+	BatchSize     int           `mapstructure:"batch_size" env:"CBC_AUTH_KAFKA_BATCH_SIZE" default:"100"`
+	BatchTimeout  time.Duration `mapstructure:"batch_timeout" env:"CBC_AUTH_KAFKA_BATCH_TIMEOUT" default:"1s"`
 }
 
 // ServerConfig holds HTTP/gRPC server settings.
@@ -85,17 +98,11 @@ type RedisConfig struct {
 
 // VaultConfig holds Vault settings.
 type VaultConfig struct {
-	Address              string        `mapstructure:"address" env:"CBC_AUTH_VAULT_ADDRESS" default:"https://vault.cbc-platform.svc.cluster.local:8200"`
-	Token                string        `mapstructure:"token" env:"CBC_AUTH_VAULT_TOKEN"`
-	RoleID               string        `mapstructure:"role_id" env:"CBC_AUTH_VAULT_ROLE_ID"`
-	SecretID             string        `mapstructure:"secret_id" env:"CBC_AUTH_VAULT_SECRET_ID"`
-	MountPath            string        `mapstructure:"mount_path" env:"CBC_AUTH_VAULT_MOUNT_PATH" default:"secret/cbc"`
-	KeyCacheTTL          time.Duration `mapstructure:"key_cache_ttl" env:"CBC_AUTH_VAULT_KEY_CACHE_TTL" default:"4h"`
-	KeyRefreshInterval   time.Duration `mapstructure:"key_refresh_interval" env:"CBC_AUTH_VAULT_KEY_REFRESH_INTERVAL" default:"1h"`
-	KeyRotationCheckTime time.Duration `mapstructure:"key_rotation_check_time" env:"CBC_AUTH_VAULT_KEY_ROTATION_CHECK_TIME" default:"24h"`
-	MaxRetries           int           `mapstructure:"max_retries" env:"CBC_AUTH_VAULT_MAX_RETRIES" default:"3"`
-	Timeout              time.Duration `mapstructure:"timeout" env:"CBC_AUTH_VAULT_TIMEOUT" default:"30s"`
-	TLSSkipVerify        bool          `mapstructure:"tls_skip_verify" env:"CBC_AUTH_VAULT_TLS_SKIP_VERIFY" default:"false"`
+	Address     string        `mapstructure:"address" env:"CBC_AUTH_VAULT_ADDRESS"`
+	TokenEnvVar string        `mapstructure:"token_env_var" env:"CBC_AUTH_VAULT_TOKEN_ENV_VAR"`
+	Token       string        `mapstructure:"token" env:"CBC_AUTH_VAULT_TOKEN"`
+	Timeout     time.Duration `mapstructure:"timeout" env:"CBC_AUTH_VAULT_TIMEOUT" default:"30s"`
+	KeyCacheTTL time.Duration `mapstructure:"key_cache_ttl" env:"CBC_AUTH_VAULT_KEY_CACHE_TTL" default:"4h"`
 }
 
 // JWTConfig holds JWT settings.
@@ -183,6 +190,23 @@ func (c *Config) Validate() error {
 	if err := c.Log.Validate(); err != nil {
 		return fmt.Errorf("log config validation failed: %w", err)
 	}
+	if err := c.Kafka.Validate(); err != nil {
+		return fmt.Errorf("kafka config validation failed: %w", err)
+	}
+	return nil
+}
+
+// Validate KafkaConfig.
+func (k *KafkaConfig) Validate() error {
+	if len(k.Brokers) == 0 || k.Brokers[0] == "" {
+		return fmt.Errorf("kafka brokers are required")
+	}
+	if k.AuditTopic == "" {
+		return fmt.Errorf("kafka audit topic is required")
+	}
+	if k.BatchSize <= 0 {
+		return fmt.Errorf("batch size must be positive")
+	}
 	return nil
 }
 
@@ -266,12 +290,6 @@ func (r *RedisConfig) Validate() error {
 func (v *VaultConfig) Validate() error {
 	if v.Address == "" {
 		return fmt.Errorf("vault address is required")
-	}
-	if v.Token == "" && (v.RoleID == "" || v.SecretID == "") {
-		return fmt.Errorf("vault authentication required: provide either token or roleID+secretID")
-	}
-	if v.MountPath == "" {
-		return fmt.Errorf("vault mount path is required")
 	}
 	return nil
 }
@@ -394,7 +412,3 @@ func (r *RedisConfig) GetRedisAddress() string {
 	return r.Address
 }
 
-// GetVaultPath returns the full Vault secret path.
-func (v *VaultConfig) GetVaultPath(subPath string) string {
-	return fmt.Sprintf("%s/%s", v.MountPath, subPath)
-}

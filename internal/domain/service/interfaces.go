@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/turtacn/cbc/internal/domain/models"
 )
 
 // CryptoService defines the interface for cryptographic operations.
@@ -45,4 +46,9 @@ type RateLimitService interface {
 type TokenBlacklistStore interface {
 	Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error
 	IsRevoked(ctx context.Context, tenantID, jti string) (bool, error)
+}
+
+// AuditService defines the interface for logging security audit events.
+type AuditService interface {
+	LogEvent(ctx context.Context, event models.AuditEvent) error
 }

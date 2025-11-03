@@ -11,6 +11,7 @@ import (
 	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
+	domainService "github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
@@ -44,16 +45,19 @@ type DeviceAppService interface {
 // deviceAppServiceImpl is the concrete implementation of DeviceAppService
 type deviceAppServiceImpl struct {
 	deviceRepo repository.DeviceRepository
+	auditService domainService.AuditService
 	logger     logger.Logger
 }
 
 // NewDeviceAppService creates a new instance of DeviceAppService
 func NewDeviceAppService(
 	deviceRepo repository.DeviceRepository,
+	auditService domainService.AuditService,
 	log logger.Logger,
 ) DeviceAppService {
 	return &deviceAppServiceImpl{
 		deviceRepo: deviceRepo,
+		auditService: auditService,
 		logger:     log,
 	}
 }
@@ -104,6 +108,13 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 	}
 
 	// Record audit log
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "device.register",
+		TenantID:  req.TenantID,
+		DeviceID:  req.AgentID,
+		Success:   true,
+		Details:   fmt.Sprintf("Device Type: %s, Trust Level: %s", req.DeviceType, device.TrustLevel),
+	})
 	s.logger.Info(ctx, "Device registered successfully",
 		logger.String("agent_id", req.AgentID),
 		logger.String("tenant_id", req.TenantID),
@@ -244,6 +255,13 @@ func (s *deviceAppServiceImpl) DeactivateDevice(ctx context.Context, agentID str
 		return errors.Wrap(err, errors.CodeInternal, "failed to deactivate device")
 	}
 
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "device.deactivate",
+		TenantID:  device.TenantID,
+		DeviceID:  agentID,
+		Success:   true,
+		Details:   fmt.Sprintf("Reason: %s", reason),
+	})
 	s.logger.Info(ctx, "Device deactivated",
 		logger.String("agent_id", agentID),
 		logger.String("reason", reason),

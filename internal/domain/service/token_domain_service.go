@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
 	"github.com/turtacn/cbc/pkg/constants"
@@ -44,7 +46,17 @@ func (s *tokenDomainService) IssueTokenPair(
 	scope []string,
 	metadata map[string]interface{},
 ) (refreshToken *models.Token, accessToken *models.Token, err error) {
-	return nil, nil, errors.ErrServerError("IssueTokenPair not implemented yet")
+	refreshToken, err = s.generateRefreshToken(ctx, tenantID, agentID, scope)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	accessToken, err = s.GenerateAccessToken(ctx, refreshToken, scope)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return refreshToken, accessToken, nil
 }
 
 func (s *tokenDomainService) RefreshToken(
@@ -138,22 +150,60 @@ func (s *tokenDomainService) GenerateAccessToken(
 }
 
 func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, scope []string) (*models.Token, error) {
-	// For now, a simplified implementation
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": deviceID,
+		"jti": uuid.New().String(),
+		"iat": now.Unix(),
+		"exp": now.Add(15 * time.Minute).Unix(),
+		"iss": "cbc-auth-service",
+		"aud": "cbc-api",
+		"tid": tenantID,
+		"scp": scope,
+	}
+
+	_, _, err := s.crypto.GenerateJWT(ctx, tenantID, claims)
+	if err != nil {
+		return nil, err
+	}
+
 	return &models.Token{
-		JTI:      "new-access-token",
-		TenantID: tenantID,
-		DeviceID: deviceID,
-		Scope:    strings.Join(scope, " "),
+		JTI:        claims["jti"].(string),
+		TenantID:   tenantID,
+		DeviceID:   deviceID,
+		Scope:      strings.Join(scope, " "),
+		TokenType:  constants.TokenTypeAccess,
+		IssuedAt:   now,
+		ExpiresAt:  time.Unix(claims["exp"].(int64), 0),
 	}, nil
 }
 
 func (s *tokenDomainService) generateRefreshToken(ctx context.Context, tenantID, deviceID string, scope []string) (*models.Token, error) {
-	// For now, a simplified implementation
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": deviceID,
+		"jti": uuid.New().String(),
+		"iat": now.Unix(),
+		"exp": now.Add(720 * time.Hour).Unix(),
+		"iss": "cbc-auth-service",
+		"aud": "cbc-auth-service",
+		"tid": tenantID,
+		"scp": scope,
+	}
+
+	_, _, err := s.crypto.GenerateJWT(ctx, tenantID, claims)
+	if err != nil {
+		return nil, err
+	}
+
 	return &models.Token{
-		JTI:      "new-refresh-token",
-		TenantID: tenantID,
-		DeviceID: deviceID,
-		Scope:    strings.Join(scope, " "),
+		JTI:        claims["jti"].(string),
+		TenantID:   tenantID,
+		DeviceID:   deviceID,
+		Scope:      strings.Join(scope, " "),
+		TokenType:  constants.TokenTypeRefresh,
+		IssuedAt:   now,
+		ExpiresAt:  time.Unix(claims["exp"].(int64), 0),
 	}, nil
 }
 

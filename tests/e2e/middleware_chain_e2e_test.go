@@ -2,7 +2,6 @@
 package e2e
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,11 +12,12 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/turtacn/cbc/internal/config"
-	"github.com/turtacn/cbc/internal/domain/service"
+	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/internal/interfaces/http/middleware"
@@ -44,7 +44,7 @@ func TestMiddlewareChainE2E(t *testing.T) {
 	})
 
 	// Rate limiter
-	rateLimiter, err := ratelimit.NewRedisRateLimiter(redisClient, &ratelimit.RateLimiterConfig{}, log)
+	rateLimiter, err := ratelimit.NewRedisRateLimiter(redisClient, &ratelimit.RateLimiterConfig{DefaultLimit: 5, DefaultWindow: 1 * time.Minute}, log)
 	if err != nil {
 		t.Fatalf("failed to create rate limiter: %v", err)
 	}
@@ -52,16 +52,26 @@ func TestMiddlewareChainE2E(t *testing.T) {
 	// Mocks
 	mockAuthApp := new(mocks.MockAuthAppService)
 
+	// Metrics
+	reg := prometheus.NewRegistry()
+	metrics := monitoring.NewMetrics(reg)
+	metricsAdapter := handlers.NewMetricsAdapter(metrics)
+
 	// Handlers
-	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, log)
-	deviceHandler := handlers.NewDeviceHandler(nil, nil, log)
+	authHandler := handlers.NewAuthHandler(mockAuthApp, metricsAdapter, log)
+	deviceHandler := handlers.NewDeviceHandler(nil, metricsAdapter, log)
 	healthHandler := handlers.NewHealthHandler(nil, nil, log)
-	jwksHandler := handlers.NewJWKSHandler(nil, log, nil)
+	jwksHandler := handlers.NewJWKSHandler(nil, log, metricsAdapter)
 
 	// Middleware
 	rateLimitMiddleware := middleware.RateLimitMiddleware(rateLimiter, &config.RateLimitConfig{Enabled: true, GlobalRPS: 5}, log)
 	idempotencyMiddleware := middleware.IdempotencyMiddleware(redisClient, &config.IdempotencyConfig{Enabled: true, RedisCacheTTL: 1 * time.Hour}, log)
 	observabilityMiddleware := middleware.ObservabilityMiddleware(tracer)
+
+	// Prometheus Metrics
+	httpRequestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "http_requests_total"}, []string{"method", "path", "status"})
+	httpRequestDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "http_request_duration_seconds"}, []string{"method", "path"})
+	reg.MustRegister(httpRequestsTotal, httpRequestDuration)
 
 	// Router
 	router := httpRouter.NewRouter(&config.Config{}, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
@@ -73,7 +83,7 @@ func TestMiddlewareChainE2E(t *testing.T) {
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/token", nil)
 			engine.ServeHTTP(w, req)
-			if w.Code == http.StatusTooManyRequests {
+			if i >= 5 && w.Code == http.StatusTooManyRequests {
 				return
 			}
 		}
@@ -107,6 +117,7 @@ func TestMiddlewareChainE2E(t *testing.T) {
 		engine.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+		time.Sleep(100 * time.Millisecond) // Allow metrics to be collected
 		assert.Equal(t, 1, testutil.CollectAndCount(httpRequestsTotal))
 		assert.Equal(t, 1, testutil.CollectAndCount(httpRequestDuration))
 	})

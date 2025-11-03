@@ -85,6 +85,16 @@ type MockBlacklistStore struct {
 	mock.Mock
 }
 
+// MockAuditService is a mock implementation of domain.AuditService
+type MockAuditService struct {
+	mock.Mock
+}
+
+func (m *MockAuditService) LogEvent(ctx context.Context, event models.AuditEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
 func (m *MockBlacklistStore) Revoke(ctx context.Context, tenantID, jti string, exp time.Time) error {
 	args := m.Called(ctx, tenantID, jti, exp)
 	return args.Error(0)
@@ -100,12 +110,14 @@ func TestAuthAppService_RevokeToken(t *testing.T) {
 	mockBlacklist := new(MockBlacklistStore)
 	testLogger := logger.NewDefaultLogger()
 
+	mockAuditService := new(MockAuditService)
 	service := appservice.NewAuthAppService(
 		mockTokenService,
 		nil, // deviceRepo
 		nil, // tenantRepo
 		nil, // rateLimitService
 		mockBlacklist,
+		mockAuditService,
 		testLogger,
 	)
 
@@ -125,6 +137,7 @@ func TestAuthAppService_RevokeToken(t *testing.T) {
 
 		mockTokenService.On("VerifyToken", ctx, tokenStr, mock.Anything, tenantID).Return(token, nil).Once()
 		mockBlacklist.On("Revoke", ctx, tenantID, jti, token.ExpiresAt).Return(nil).Once()
+		mockAuditService.On("LogEvent", ctx, mock.Anything).Return(nil).Once()
 
 		req := &dto.RevokeTokenRequest{
 			Token:    tokenStr,

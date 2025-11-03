@@ -54,3 +54,7 @@ data:
   features.multi_tenant: "true"
   features.device_tracking: "true"
   features.token_rotation: "true"
+
+  # Kafka configuration
+  kafka.brokers: "kafka.cbc-system.svc.cluster.local:9092"
+  kafka.audit_topic: "cbc-audit-logs"
