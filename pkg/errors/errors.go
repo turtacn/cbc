@@ -33,6 +33,12 @@ const (
 	ErrCodeServiceUnavailable = "service_unavailable"
 	ErrCodeConflict           = "conflict"
 	CodeUnauthenticated       = "unauthenticated"
+
+	// RFC 8628 Device Authorization Grant Error Codes
+	ErrCodeAuthorizationPending = "authorization_pending"
+	ErrCodeSlowDown             = "slow_down"
+	ErrCodeAccessDenied         = "access_denied"
+	ErrCodeExpiredToken         = "expired_token"
 )
 
 // ================================================================================
@@ -286,6 +292,50 @@ func ErrMgrClientNotFound(clientID string) CBCError {
 func ErrMgrClientAssertionInvalid(reason string) CBCError {
 	return ErrInvalidClient(fmt.Sprintf("Client assertion is invalid: %s", reason)).
 		WithMetadata("reason", reason)
+}
+
+// ================================================================================
+// RFC 8628 Device Flow Error Constructors
+// ================================================================================
+
+// ErrAuthorizationPending creates an authorization_pending error
+func ErrAuthorizationPending() CBCError {
+	return NewError(
+		ErrCodeAuthorizationPending,
+		http.StatusBadRequest,
+		"The authorization request is still pending as the end-user has not yet completed the user interaction steps.",
+		"Authorization pending",
+	)
+}
+
+// ErrSlowDown creates a slow_down error
+func ErrSlowDown() CBCError {
+	return NewError(
+		ErrCodeSlowDown,
+		http.StatusBadRequest,
+		"The client is polling too frequently. The client should slow down its polling rate.",
+		"Slow down",
+	)
+}
+
+// ErrAccessDenied creates an access_denied error for the device flow
+func ErrDeviceFlowAccessDenied() CBCError {
+	return NewError(
+		ErrCodeAccessDenied,
+		http.StatusBadRequest,
+		"The end-user denied the authorization request.",
+		"Access denied",
+	)
+}
+
+// ErrExpiredToken creates an expired_token error for the device flow
+func ErrDeviceFlowExpiredToken() CBCError {
+	return NewError(
+		ErrCodeExpiredToken,
+		http.StatusBadRequest,
+		"The device_code has expired, and the device authorization session has concluded.",
+		"Device code expired",
+	)
 }
 
 // ErrAgentNotFound creates an agent not found error

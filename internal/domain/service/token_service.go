@@ -35,6 +35,8 @@ type TokenService interface {
 		metadata map[string]interface{},
 	) (refreshToken *models.Token, accessToken *models.Token, err error)
 
+	IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error)
+
 	// RefreshToken 使用 Refresh Token 获取新的 Access Token
 	// 实现一次性 Refresh Token 机制（旧 Refresh Token 立即失效）
 	// 参数:

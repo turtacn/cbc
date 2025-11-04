@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/turtacn/cbc/pkg/constants"
 )
 
@@ -224,6 +225,23 @@ func findInMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ToClaims converts the Token model to a JWT Claims object.
+func (t *Token) ToClaims() jwt.Claims {
+	return &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        t.JTI,
+			Subject:   t.DeviceID, // Or user ID, depending on the grant
+			Audience:  jwt.ClaimStrings{"api"},
+			ExpiresAt: jwt.NewNumericDate(t.ExpiresAt),
+			IssuedAt:  jwt.NewNumericDate(t.IssuedAt),
+			NotBefore: jwt.NewNumericDate(t.IssuedAt),
+		},
+		TenantID: t.TenantID,
+		DeviceID: t.DeviceID,
+		Scope:    t.Scope,
+	}
 }
 
 // TokenIntrospection represents the response from a token introspection endpoint.

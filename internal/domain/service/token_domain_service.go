@@ -226,3 +226,7 @@ func (s *tokenDomainService) IntrospectToken(
 func (s *tokenDomainService) CleanupExpiredTokens(ctx context.Context, before time.Time) (int64, error) {
 	return 0, errors.ErrServerError("CleanupExpiredTokens not implemented yet")
 }
+
+func (s *tokenDomainService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
+	return s.generateAccessToken(ctx, tenantID, subject, scope)
+}

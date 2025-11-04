@@ -14,9 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	appservice "github.com/turtacn/cbc/internal/application/service"
-	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/domain/service"
-	"github.com/turtacn/cbc/internal/infrastructure/kms"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/pkg/logger"
@@ -40,12 +38,6 @@ func (suite *JwtSignatureE2ETestSuite) SetupSuite() {
 }
 
 func (suite *JwtSignatureE2ETestSuite) SetupTest() {
-	// For this E2E test, we'll wire up the real services
-	// but with a mock for the database/repositories
-
-	// Config
-	cfg := config.Config{}
-
 	// Logger
 	log := logger.NewNoopLogger()
 
@@ -70,7 +62,7 @@ func (suite *JwtSignatureE2ETestSuite) SetupTest() {
 	metricsAdapter := handlers.NewMetricsAdapter(metrics)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(authAppService, metricsAdapter, log)
+	authHandler := handlers.NewAuthHandler(authAppService, nil, metricsAdapter, log)
 	jwksHandler := handlers.NewJWKSHandler(cryptoService, log, metricsAdapter)
 
 	// Router

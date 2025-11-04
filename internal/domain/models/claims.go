@@ -7,4 +7,5 @@ type Claims struct {
 	jwt.RegisteredClaims
 	TenantID string `json:"tenant_id"`
 	DeviceID string `json:"device_id"`
+	Scope    string `json:"scope"`
 }

@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,9 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	appservice "github.com/turtacn/cbc/internal/application/service"
-	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/domain/models"
-	"github.com/turtacn/cbc/internal/infrastructure/audit"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/pkg/logger"
@@ -36,9 +33,6 @@ type AuditFlowE2ETestSuite struct {
 }
 
 func (suite *AuditFlowE2ETestSuite) SetupTest() {
-	// Config
-	cfg := config.Config{}
-
 	// Logger
 	log := logger.NewNoopLogger()
 
@@ -59,16 +53,20 @@ func (suite *AuditFlowE2ETestSuite) SetupTest() {
 	metricsAdapter := handlers.NewMetricsAdapter(metrics)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(authAppService, metricsAdapter, log)
+	authHandler := handlers.NewAuthHandler(authAppService, nil, metricsAdapter, log)
 
 	// Router
 	suite.router = gin.Default()
-	suite.router.POST("/api/v1/devices", authHandler.RegisterDevice)
+	suite.router.POST("/api/v1/auth/register-device", authHandler.RegisterDevice)
 }
 
 func (suite *AuditFlowE2ETestSuite) TestAuditFlow() {
 	// 1. Register a device
 	reqBody := `{
+		"client_id": "test-client",
+		"client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+		"client_assertion": "test-assertion",
+		"grant_type": "client_credentials",
 		"tenant_id": "e2e-tenant",
 		"agent_id": "e2e-agent",
 		"device_fingerprint": "e2e-fingerprint",
@@ -76,10 +74,11 @@ func (suite *AuditFlowE2ETestSuite) TestAuditFlow() {
 		"device_type": "desktop"
 	}`
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/devices", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", "/api/v1/auth/register-device", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	// Mock the service calls
+	suite.mockTokenService.On("ValidateClientAssertion", mock.Anything, "test-assertion").Return(&models.Claims{TenantID: "e2e-tenant"}, nil)
 	suite.mockTenantRepo.On("FindByID", mock.Anything, "e2e-tenant").Return(&models.Tenant{TenantID: "e2e-tenant"}, nil)
 	suite.mockDeviceRepo.On("FindByFingerprint", mock.Anything, "e2e-tenant", "e2e-fingerprint").Return(nil, nil)
 	suite.mockDeviceRepo.On("Save", mock.Anything, mock.AnythingOfType("*models.Device")).Return(nil)

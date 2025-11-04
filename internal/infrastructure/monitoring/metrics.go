@@ -45,6 +45,10 @@ type Metrics struct {
 
 	// System 相关指标
 	GoroutineCount prometheus.Gauge
+
+	// HTTP metrics
+	HTTPRequestsTotal   *prometheus.CounterVec
+	HTTPRequestDuration *prometheus.HistogramVec
 }
 
 // NewMetrics 创建并注册所有指标
@@ -214,6 +218,23 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				Name: "cbc_auth_goroutine_count",
 				Help: "Current number of goroutines",
 			},
+		),
+
+		HTTPRequestsTotal: factory.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "http_requests_total",
+				Help: "Total number of HTTP requests.",
+			},
+			[]string{"method", "path", "status"},
+		),
+
+		HTTPRequestDuration: factory.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "http_request_duration_seconds",
+				Help:    "Duration of HTTP requests.",
+				Buckets: prometheus.DefBuckets,
+			},
+			[]string{"method", "path"},
 		),
 	}
 

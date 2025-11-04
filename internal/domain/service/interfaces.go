@@ -52,3 +52,13 @@ type TokenBlacklistStore interface {
 type AuditService interface {
 	LogEvent(ctx context.Context, event models.AuditEvent) error
 }
+
+// DeviceAuthStore defines the interface for storing and managing device authorization sessions.
+type DeviceAuthStore interface {
+	CreateSession(ctx context.Context, session *models.DeviceAuthSession) error
+	GetSessionByDeviceCode(ctx context.Context, deviceCode string) (*models.DeviceAuthSession, error)
+	GetSessionByUserCode(ctx context.Context, userCode string) (*models.DeviceAuthSession, error)
+	ApproveSession(ctx context.Context, userCode, tenantID, subject string) error
+	DenySession(ctx context.Context, userCode string) error
+	TouchPoll(ctx context.Context, deviceCode string) error
+}

@@ -49,12 +49,13 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 	mockCrypto.On("GetPrivateKey", mock.Anything, mock.Anything).Return(pk, "kid", nil)
 	mockCrypto.On("GetPublicKey", mock.Anything, mock.Anything, mock.Anything).Return(&pk.PublicKey, nil)
 
-	authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
 	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
+	oauthHandler := handlers.NewOAuthHandler(nil)
 
-	r := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, nil, nil, nil)
+	r := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, nil, nil, nil, nil)
 	r.SetupRoutes()
 	engine := r.Engine()
 

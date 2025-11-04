@@ -31,6 +31,27 @@ func (m *MockAuthAppService) IssueToken(ctx context.Context, req *dto.IssueToken
 	return args.Get(0).(*dto.TokenResponse), args.Error(1)
 }
 
+func (m *MockAuthAppService) StartDeviceFlow(ctx context.Context, clientID, scope string) (*dto.DeviceAuthResponse, error) {
+	args := m.Called(ctx, clientID, scope)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*dto.DeviceAuthResponse), args.Error(1)
+}
+
+func (m *MockAuthAppService) VerifyDeviceFlow(ctx context.Context, userCode, action, tenantID, subject string) error {
+	args := m.Called(ctx, userCode, action, tenantID, subject)
+	return args.Error(0)
+}
+
+func (m *MockAuthAppService) PollDeviceToken(ctx context.Context, deviceCode, clientID string) (*dto.TokenResponse, error) {
+	args := m.Called(ctx, deviceCode, clientID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*dto.TokenResponse), args.Error(1)
+}
+
 func (m *MockAuthAppService) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.TokenResponse, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -87,7 +108,7 @@ func TestAuthHandler_IssueToken(t *testing.T) {
 	mockMetrics := new(MockHTTPMetrics)
 	log := logger.NewDefaultLogger()
 
-	handler := NewAuthHandler(mockAppService, mockMetrics, log)
+	handler := NewAuthHandler(mockAppService, nil, mockMetrics, log)
 
 	router := gin.Default()
 	router.POST("/token", handler.IssueToken)

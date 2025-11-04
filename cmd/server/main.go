@@ -87,6 +87,7 @@ type Application struct {
 	tenantRepo repository.TenantRepository
 	authAppService service.AuthAppService
 	deviceAppService service.DeviceAppService
+	deviceAuthAppService service.DeviceAuthAppService
 	tenantAppService service.TenantAppService
 	httpServer *http.Server
 	grpcServer *grpc.Server
@@ -264,7 +265,15 @@ func (app *Application) initRepositories() error {
 
 func (app *Application) initApplicationServices() error {
 	tokenDomainService := domainService.NewTokenDomainService(app.tokenRepo, app.cryptoService, app.logger)
+
+	redisClient, ok := app.redisClient.GetClient().(*redis.Client)
+	if !ok {
+		return fmt.Errorf("unexpected redis client type: %T", app.redisClient.GetClient())
+	}
+	deviceAuthStore := redisStore.NewRedisDeviceAuthStore(redisClient)
+
 	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
+	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.cryptoService, &app.config.OAuth)
 	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.cryptoService, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
@@ -283,7 +292,8 @@ func (app *Application) initInterfaces() error {
 		httpPort = ":" + DefaultHTTPPort
 	}
 	metricsAdapter := handlers.NewMetricsAdapter(app.metrics)
-	authHandler := handlers.NewAuthHandler(app.authAppService, metricsAdapter, app.logger)
+	authHandler := handlers.NewAuthHandler(app.authAppService, app.deviceAuthAppService, metricsAdapter, app.logger)
+	oauthHandler := handlers.NewOAuthHandler(app.deviceAuthAppService)
 	deviceHandler := handlers.NewDeviceHandler(app.deviceAppService, metricsAdapter, app.logger)
 	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, app.logger)
 	jwksHandler := handlers.NewJWKSHandler(app.cryptoService, app.logger, metricsAdapter)
@@ -292,9 +302,9 @@ func (app *Application) initInterfaces() error {
 	authMiddleware := middleware.RequireJWT(app.cryptoService, app.blacklistStore, app.logger)
 	rateLimitMiddleware := middleware.RateLimitMiddleware(app.rateLimitService, &app.config.RateLimit, app.logger)
 	idempotencyMiddleware := middleware.IdempotencyMiddleware(app.redisClient.GetClient(), &app.config.Idempotency, app.logger)
-	observabilityMiddleware := middleware.ObservabilityMiddleware(otel.Tracer(ServiceName))
+	observabilityMiddleware := middleware.ObservabilityMiddleware(otel.Tracer(ServiceName), app.metrics.HTTPRequestsTotal, app.metrics.HTTPRequestDuration)
 
-	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler, authMiddleware, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
+	router := httpRouter.NewRouter(app.config, app.logger, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, authMiddleware, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
 	router.SetupRoutes()
 	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine(), TLSConfig: tlsConfig}
 	app.logger.Info(app.ctx, "HTTP interface initialized", logger.String("port", httpPort))

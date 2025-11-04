@@ -1,4 +1,3 @@
-//go:build test
 package fakes
 
 import (
@@ -6,6 +5,8 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"sync"
+
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/turtacn/cbc/internal/domain/service"
 )
 
@@ -61,6 +62,28 @@ func (f *FakeKMS) GetPublicKey(ctx context.Context, tenantID, kid string) (*rsa.
 		return nil, fmt.Errorf("key not found for kid %s", kid)
 	}
 	return &key.PublicKey, nil
+}
+
+// EncryptSensitiveData is a placeholder implementation.
+func (f *FakeKMS) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+	return data, nil
+}
+
+// DecryptSensitiveData is a placeholder implementation.
+func (f *FakeKMS) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+	return data, nil
+}
+
+func (f *FakeKMS) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (tokenString string, keyID string, err error) {
+	return "", "", nil
+}
+
+func (f *FakeKMS) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
+	return nil, nil
+}
+
+func (f *FakeKMS) RotateKey(ctx context.Context, tenantID string) (string, error) {
+	return "", nil
 }
 
 var _ service.CryptoService = (*FakeKMS)(nil)

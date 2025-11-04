@@ -25,6 +25,11 @@ type MockTokenService struct {
 	mock.Mock
 }
 
+func (m *MockTokenService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
+	args := m.Called(ctx, tenantID, subject, scope)
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
 func (m *MockTokenService) IssueTokenPair(ctx context.Context, tenantID, agentID, deviceFingerprint string, scope []string, metadata map[string]interface{}) (*models.Token, *models.Token, error) {
 	args := m.Called(ctx, tenantID, agentID, deviceFingerprint, scope, metadata)
 	// This mock returns refreshToken first, then accessToken

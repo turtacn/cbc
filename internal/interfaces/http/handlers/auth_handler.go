@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,21 +14,24 @@ import (
 
 // AuthHandler 认证 HTTP 处理器
 type AuthHandler struct {
-	authService service.AuthAppService
-	metrics     HTTPMetrics
-	logger      logger.Logger
+	authService          service.AuthAppService
+	deviceAuthAppService service.DeviceAuthAppService
+	metrics              HTTPMetrics
+	logger               logger.Logger
 }
 
 // NewAuthHandler 创建认证处理器
 func NewAuthHandler(
 	authService service.AuthAppService,
+	deviceAuthAppService service.DeviceAuthAppService,
 	metrics HTTPMetrics,
 	log logger.Logger,
 ) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
-		metrics:     metrics,
-		logger:      log,
+		authService:          authService,
+		deviceAuthAppService: deviceAuthAppService,
+		metrics:              metrics,
+		logger:               log,
 	}
 }
 
@@ -51,6 +55,16 @@ func (h *AuthHandler) IssueToken(c *gin.Context) {
 		return
 	}
 
+	if req.GrantType == "urn:ietf:params:oauth:grant-type:device_code" {
+		response, err := h.deviceAuthAppService.PollDeviceToken(c.Request.Context(), req.DeviceCode, req.ClientID)
+		if err != nil {
+			h.handleAuthError(c, err, "issue_token")
+			return
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
 	// 调用应用服务
 	response, err := h.authService.IssueToken(c.Request.Context(), &req)
 	if err != nil {
@@ -71,6 +85,9 @@ func (h *AuthHandler) RegisterDevice(c *gin.Context) {
 	h.metrics.RecordRequestStart(c.Request.Context(), "register_device")
 	var req dto.RegisterDeviceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		bodyBytes, _ := c.GetRawData()
+		fmt.Println("Request body:", string(bodyBytes))
+		fmt.Println("Binding error:", err)
 		h.logger.Warn(c.Request.Context(), "Invalid register device request", logger.Error(err))
 		h.metrics.RecordRequestError(c.Request.Context(), "register_device", http.StatusBadRequest)
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse(err, ""))

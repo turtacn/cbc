@@ -58,23 +58,20 @@ func TestMiddlewareChainE2E(t *testing.T) {
 	metricsAdapter := handlers.NewMetricsAdapter(metrics)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(mockAuthApp, metricsAdapter, log)
+	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metricsAdapter, log)
 	deviceHandler := handlers.NewDeviceHandler(nil, metricsAdapter, log)
 	healthHandler := handlers.NewHealthHandler(nil, nil, log)
 	jwksHandler := handlers.NewJWKSHandler(nil, log, metricsAdapter)
+	oauthHandler := handlers.NewOAuthHandler(nil)
 
 	// Middleware
 	rateLimitMiddleware := middleware.RateLimitMiddleware(rateLimiter, &config.RateLimitConfig{Enabled: true, GlobalRPS: 5}, log)
 	idempotencyMiddleware := middleware.IdempotencyMiddleware(redisClient, &config.IdempotencyConfig{Enabled: true, RedisCacheTTL: 1 * time.Hour}, log)
-	observabilityMiddleware := middleware.ObservabilityMiddleware(tracer)
-
-	// Prometheus Metrics
-	httpRequestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "http_requests_total"}, []string{"method", "path", "status"})
-	httpRequestDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "http_request_duration_seconds"}, []string{"method", "path"})
-	reg.MustRegister(httpRequestsTotal, httpRequestDuration)
+	observabilityMiddleware := middleware.ObservabilityMiddleware(tracer, metrics.HTTPRequestsTotal, metrics.HTTPRequestDuration)
+	authMiddleware := middleware.RequireJWT(nil, nil, log)
 
 	// Router
-	router := httpRouter.NewRouter(&config.Config{}, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
+	router := httpRouter.NewRouter(&config.Config{}, log, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, authMiddleware, rateLimitMiddleware, idempotencyMiddleware, observabilityMiddleware)
 	router.SetupRoutes()
 	engine := router.Engine()
 
@@ -118,8 +115,8 @@ func TestMiddlewareChainE2E(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		time.Sleep(100 * time.Millisecond) // Allow metrics to be collected
-		assert.Equal(t, 1, testutil.CollectAndCount(httpRequestsTotal))
-		assert.Equal(t, 1, testutil.CollectAndCount(httpRequestDuration))
+		assert.Equal(t, 1, testutil.CollectAndCount(metrics.HTTPRequestsTotal))
+		assert.Equal(t, 1, testutil.CollectAndCount(metrics.HTTPRequestDuration))
 	})
 }
 

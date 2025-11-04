@@ -25,6 +25,7 @@ type Router struct {
 	logger                logger.Logger
 	healthHandler         *handlers.HealthHandler
 	authHandler           *handlers.AuthHandler
+	oauthHandler          *handlers.OAuthHandler
 	deviceHandler         *handlers.DeviceHandler
 	jwksHandler           *handlers.JWKSHandler
 	authMiddleware        gin.HandlerFunc
@@ -42,6 +43,7 @@ func NewRouter(
 	authHandler *handlers.AuthHandler,
 	deviceHandler *handlers.DeviceHandler,
 	jwksHandler *handlers.JWKSHandler,
+	oauthHandler *handlers.OAuthHandler,
 	authMiddleware gin.HandlerFunc,
 	rateLimitMiddleware gin.HandlerFunc,
 	idempotencyMiddleware gin.HandlerFunc,
@@ -57,6 +59,7 @@ func NewRouter(
 		logger:                log,
 		healthHandler:         healthHandler,
 		authHandler:           authHandler,
+		oauthHandler:          oauthHandler,
 		deviceHandler:         deviceHandler,
 		jwksHandler:           jwksHandler,
 		authMiddleware:        authMiddleware,
@@ -109,6 +112,13 @@ func (r *Router) SetupRoutes() {
 			auth.POST("/refresh", r.authHandler.RefreshToken)
 			auth.POST("/revoke", r.authHandler.RevokeToken)
 			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
+		}
+		oauth := v1.Group("/oauth")
+		{
+			oauth.POST("/device_authorization", r.oauthHandler.StartDeviceAuthorization)
+			if r.config.OAuth.DevVerifyAPIEnabled {
+				oauth.POST("/verify", r.oauthHandler.VerifyUserCode)
+			}
 		}
 		devices := v1.Group("/devices")
 		devices.Use(r.authMiddleware)

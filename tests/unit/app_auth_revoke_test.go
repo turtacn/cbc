@@ -28,6 +28,14 @@ func (m *MockTokenService) IssueTokenPair(ctx context.Context, tenantID string, 
 	return args.Get(0).(*models.Token), args.Get(1).(*models.Token), args.Error(2)
 }
 
+func (m *MockTokenService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
+	args := m.Called(ctx, tenantID, subject, scope)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
 func (m *MockTokenService) RefreshToken(ctx context.Context, refreshTokenString string, requestedScope []string) (newRefreshToken *models.Token, accessToken *models.Token, err error) {
 	args := m.Called(ctx, refreshTokenString, requestedScope)
 	if args.Get(0) == nil {

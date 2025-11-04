@@ -20,6 +20,15 @@ type Config struct {
 	Log           LogConfig           `mapstructure:"log"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Kafka         KafkaConfig         `mapstructure:"kafka"`
+	OAuth         OAuthConfig         `mapstructure:"oauth"`
+}
+
+// OAuthConfig holds settings for OAuth 2.0 features, including Device Authorization Grant.
+type OAuthConfig struct {
+	DeviceAuthExpiresIn time.Duration `mapstructure:"device_auth_expires_in" env:"CBC_AUTH_OAUTH_DEVICE_AUTH_EXPIRES_IN" default:"600s"`
+	DeviceAuthInterval  time.Duration `mapstructure:"device_auth_interval" env:"CBC_AUTH_OAUTH_DEVICE_AUTH_INTERVAL" default:"5s"`
+	VerificationURI     string        `mapstructure:"verification_uri" env:"CBC_AUTH_OAUTH_VERIFICATION_URI" default:"https://example.com/verify"`
+	DevVerifyAPIEnabled bool          `mapstructure:"dev_verify_api_enabled" env:"CBC_AUTH_OAUTH_DEV_VERIFY_API_ENABLED" default:"false"`
 }
 
 // KafkaConfig holds Kafka settings for the audit producer.
@@ -192,6 +201,26 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Kafka.Validate(); err != nil {
 		return fmt.Errorf("kafka config validation failed: %w", err)
+	}
+	if err := c.OAuth.Validate(); err != nil {
+		return fmt.Errorf("oauth config validation failed: %w", err)
+	}
+	return nil
+}
+
+// Validate OAuthConfig.
+func (o *OAuthConfig) Validate() error {
+	if o.DeviceAuthExpiresIn <= 0 {
+		return fmt.Errorf("device auth expires in must be positive")
+	}
+	if o.DeviceAuthInterval <= 0 {
+		return fmt.Errorf("device auth interval must be positive")
+	}
+	if o.DeviceAuthExpiresIn <= o.DeviceAuthInterval {
+		return fmt.Errorf("device auth expires in must be greater than interval")
+	}
+	if o.VerificationURI == "" {
+		return fmt.Errorf("verification URI is required")
 	}
 	return nil
 }

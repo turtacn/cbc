@@ -42,13 +42,14 @@ func TestAuthHttpSanity(t *testing.T) {
 	mockRedis.On("HealthCheck", mock.Anything).Return(map[string]interface{}{"status": "ok"}, nil)
 
 	// Setup handlers
-	authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
 	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 
 	// Setup router
-	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, nil, nil, nil, nil)
+	oauthHandler := handlers.NewOAuthHandler(nil)
+	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, nil, nil, nil, nil)
 	router.SetupRoutes()
 	engine := router.Engine()
 

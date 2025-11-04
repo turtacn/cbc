@@ -28,7 +28,7 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -51,7 +51,7 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 
 	t.Run("invalid request", func(t *testing.T) {
 		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -75,7 +75,7 @@ func TestAuthHandler_RevokeToken(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -94,7 +94,7 @@ func TestAuthHandler_RevokeToken(t *testing.T) {
 
 	t.Run("service error", func(t *testing.T) {
 		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, metrics, log)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)

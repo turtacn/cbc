@@ -14,6 +14,7 @@ type TokenIssueRequest struct {
 	AgentID      string `json:"agent_id" validate:"omitempty,min=1,max=128"`
 	Scope        string `json:"scope" validate:"omitempty"`
 	DeviceInfo   string `json:"device_info" validate:"omitempty"`
+	DeviceCode   string `json:"device_code,omitempty"`
 }
 
 // TokenRefreshRequest 令牌刷新请求 DTO
@@ -146,5 +147,3 @@ func (r *TokenResponse) WithRefreshToken(refreshToken string) *TokenResponse {
 	r.RefreshToken = refreshToken
 	return r
 }
-
-//Personal.AI order the ending

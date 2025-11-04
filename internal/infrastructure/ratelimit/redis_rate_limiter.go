@@ -174,7 +174,7 @@ func (rl *RedisRateLimiter) Allow(
 	limit := rl.config.DefaultLimit
 	window := rl.config.DefaultWindow
 
-	redisKey := rl.buildKey(dimension, identifier)
+	redisKey := rl.buildKey(dimension, fmt.Sprintf("%s:%s", key, identifier))
 	rate := float64(limit) / window.Seconds()
 
 	now := time.Now()
@@ -224,7 +224,7 @@ func (rl *RedisRateLimiter) ResetLimit(
 	identifier string,
 	action string,
 ) error {
-	key := rl.buildKey(dimension, identifier)
+	key := rl.buildKey(dimension, fmt.Sprintf("%s:%s", identifier, action))
 
 	err := rl.client.Del(ctx, key).Err()
 	if err != nil && err != redis.Nil {
