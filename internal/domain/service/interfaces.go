@@ -62,3 +62,16 @@ type DeviceAuthStore interface {
 	DenySession(ctx context.Context, userCode string) error
 	TouchPoll(ctx context.Context, deviceCode string) error
 }
+
+// PolicyService defines the interface for policy-based decisions.
+type PolicyService interface {
+	// EvaluateTrustLevel evaluates the trust level of a device based on its fingerprint.
+	EvaluateTrustLevel(ctx context.Context, fingerprint string) (string, error)
+	// EvaluateContextAccess evaluates if access should be granted based on the token claims and context.
+	EvaluateContextAccess(ctx context.Context, claims jwt.MapClaims, e_context map[string]interface{}) (bool, error)
+}
+
+// MgrKeyFetcher defines the interface for fetching MGR public keys.
+type MgrKeyFetcher interface {
+	GetMgrPublicKey(ctx context.Context, clientID, kid string) (*rsa.PublicKey, error)
+}

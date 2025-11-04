@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/turtacn/cbc/internal/application/dto"
+	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
 	domainService "github.com/turtacn/cbc/internal/domain/service"
@@ -44,70 +46,77 @@ type DeviceAppService interface {
 
 // deviceAppServiceImpl is the concrete implementation of DeviceAppService
 type deviceAppServiceImpl struct {
-	deviceRepo repository.DeviceRepository
-	auditService domainService.AuditService
-	logger     logger.Logger
+	deviceRepo    repository.DeviceRepository
+	auditService  domainService.AuditService
+	mgrKeyFetcher domainService.MgrKeyFetcher
+	policyService domainService.PolicyService
+	tokenService  domainService.TokenService
+	cfg           *config.Config
+	logger        logger.Logger
 }
 
 // NewDeviceAppService creates a new instance of DeviceAppService
 func NewDeviceAppService(
 	deviceRepo repository.DeviceRepository,
 	auditService domainService.AuditService,
+	mgrKeyFetcher domainService.MgrKeyFetcher,
+	policyService domainService.PolicyService,
+	tokenService domainService.TokenService,
+	cfg *config.Config,
 	log logger.Logger,
 ) DeviceAppService {
 	return &deviceAppServiceImpl{
-		deviceRepo: deviceRepo,
-		auditService: auditService,
-		logger:     log,
+		deviceRepo:    deviceRepo,
+		auditService:  auditService,
+		mgrKeyFetcher: mgrKeyFetcher,
+		policyService: policyService,
+		tokenService:  tokenService,
+		cfg:           cfg,
+		logger:        log,
 	}
 }
 
 // RegisterDevice implements device registration
 func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.DeviceResponse, error) {
-	// Validate request
-	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid register device request", err)
-		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid register device request")
+	// 1. Verify MGR Client Assertion
+	if err := s.verifyMgrClientAssertion(ctx, req.ClientAssertion, req.ClientID); err != nil {
+		return nil, err
 	}
 
-	// Check if device already exists
+	// 2. Check if device already exists
 	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
 	if err != nil && !errors.IsNotFoundError(err) {
-		s.logger.Error(ctx, "Failed to check device existence", err, logger.String("agent_id", req.AgentID))
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check device existence")
 	}
-
 	if existingDevice != nil {
-		s.logger.Warn(ctx, "Device already exists", logger.String("agent_id", req.AgentID))
 		return nil, errors.New(errors.ErrCodeConflict, "device already exists", "")
 	}
 
-	// Generate device fingerprint hash if not provided
-	deviceFingerprint := req.DeviceFingerprint
-	if deviceFingerprint == "" {
-		deviceFingerprint = s.generateDeviceFingerprint(req)
+	// 3. Evaluate trust level
+	trustLevel, err := s.policyService.EvaluateTrustLevel(ctx, req.DeviceFingerprint)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to evaluate trust level")
 	}
 
-	// Create device model
+	// 4. Create device model
 	device := &models.Device{
 		DeviceID:          req.AgentID,
 		TenantID:          req.TenantID,
-		DeviceFingerprint: deviceFingerprint,
+		DeviceFingerprint: req.DeviceFingerprint,
 		DeviceName:        req.DeviceName,
 		DeviceType:        constants.DeviceType(req.DeviceType),
-		TrustLevel:        s.calculateInitialTrustLevel(req),
+		TrustLevel:        constants.TrustLevel(trustLevel),
 		Status:            constants.DeviceStatusActive,
 		RegisteredAt:      time.Now(),
 		LastSeenAt:        time.Now(),
 	}
 
-	// Save device to database
+	// 5. Save device to database
 	if err := s.deviceRepo.Save(ctx, device); err != nil {
-		s.logger.Error(ctx, "Failed to create device", err, logger.String("agent_id", req.AgentID))
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create device")
 	}
 
-	// Record audit log
+	// 6. Record audit log
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "device.register",
 		TenantID:  req.TenantID,
@@ -115,14 +124,14 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 		Success:   true,
 		Details:   fmt.Sprintf("Device Type: %s, Trust Level: %s", req.DeviceType, device.TrustLevel),
 	})
-	s.logger.Info(ctx, "Device registered successfully",
-		logger.String("agent_id", req.AgentID),
-		logger.String("tenant_id", req.TenantID),
-		logger.String("device_type", req.DeviceType),
-		logger.String("trust_level", string(device.TrustLevel)),
-	)
 
-	return s.deviceToResponse(device), nil
+	// 7. Issue a refresh token
+	refreshToken, _, err := s.tokenService.IssueTokenPair(ctx, device.TenantID, device.DeviceID, device.DeviceFingerprint, []string{"device"}, map[string]interface{}{"trust_level": trustLevel})
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to issue refresh token")
+	}
+
+	return s.deviceToResponse(device, refreshToken.JTI), nil
 }
 
 // GetDeviceInfo retrieves device information
@@ -351,8 +360,8 @@ func (s *deviceAppServiceImpl) calculateInitialTrustLevel(req *dto.RegisterDevic
 }
 
 // deviceToResponse converts device model to response DTO
-func (s *deviceAppServiceImpl) deviceToResponse(device *models.Device) *dto.DeviceResponse {
-	return &dto.DeviceResponse{
+func (s *deviceAppServiceImpl) deviceToResponse(device *models.Device, refreshToken ...string) *dto.DeviceResponse {
+	resp := &dto.DeviceResponse{
 		AgentID:           device.DeviceID,
 		TenantID:          device.TenantID,
 		DeviceFingerprint: device.DeviceFingerprint,
@@ -363,7 +372,60 @@ func (s *deviceAppServiceImpl) deviceToResponse(device *models.Device) *dto.Devi
 		RegisteredAt:      device.RegisteredAt,
 		LastSeenAt:        device.LastSeenAt,
 	}
+	if len(refreshToken) > 0 {
+		resp.RefreshToken = refreshToken[0]
+	}
+	return resp
 }
 
-//Personal.AI order the ending
+func (s *deviceAppServiceImpl) verifyMgrClientAssertion(ctx context.Context, assertion, clientID string) error {
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}))
+	token, err := parser.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
+		kid, ok := token.Header["kid"].(string)
+		if !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, "missing kid in token header", "")
+		}
+		return s.mgrKeyFetcher.GetMgrPublicKey(ctx, clientID, kid)
+	})
+
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeUnauthorized, "invalid client assertion")
+	}
+
+	if !token.Valid {
+		return errors.New(errors.ErrCodeUnauthorized, "client assertion is not valid", "")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return errors.New(errors.ErrCodeUnauthorized, "invalid claims format", "")
+	}
+
+	if sub, err := claims.GetSubject(); err != nil || sub != clientID {
+		return errors.New(errors.ErrCodeUnauthorized, "invalid subject in client assertion", "")
+	}
+
+	if iss, err := claims.GetIssuer(); err != nil || iss != clientID {
+		return errors.New(errors.ErrCodeUnauthorized, "invalid issuer in client assertion", "")
+	}
+
+	if aud, err := claims.GetAudience(); err != nil || !s.isValidAudience(aud) {
+		return errors.New(errors.ErrCodeUnauthorized, "invalid audience in client assertion", "")
+	}
+
+	if exp, err := claims.GetExpirationTime(); err != nil || exp.Time.Before(time.Now()) {
+		return errors.New(errors.ErrCodeUnauthorized, "client assertion has expired", "")
+	}
+
+	return nil
+}
+
+func (s *deviceAppServiceImpl) isValidAudience(aud jwt.ClaimStrings) bool {
+	for _, a := range aud {
+		if a == s.cfg.Server.IssuerURL {
+			return true
+		}
+	}
+	return false
+}
 

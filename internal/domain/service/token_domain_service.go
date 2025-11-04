@@ -51,6 +51,13 @@ func (s *tokenDomainService) IssueTokenPair(
 		return nil, nil, err
 	}
 
+	if trustLevel, ok := metadata["trust_level"].(string); ok {
+		if refreshToken.Metadata == nil {
+			refreshToken.Metadata = make(map[string]interface{})
+		}
+		refreshToken.Metadata["device_trust_level"] = trustLevel
+	}
+
 	accessToken, err = s.GenerateAccessToken(ctx, refreshToken, scope)
 	if err != nil {
 		return nil, nil, err
@@ -144,12 +151,11 @@ func (s *tokenDomainService) GenerateAccessToken(
 	refreshToken *models.Token,
 	requestedScope []string,
 ) (*models.Token, error) {
-	// For now, we'll just generate a new token with the same claims.
-	// A more complete implementation would handle scope reduction.
-	return s.generateAccessToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, requestedScope)
+	trustLevel, _ := refreshToken.Metadata["device_trust_level"].(string)
+	return s.generateAccessToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, requestedScope, trustLevel)
 }
 
-func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, scope []string) (*models.Token, error) {
+func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, scope []string, trustLevel string) (*models.Token, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub": deviceID,
@@ -160,6 +166,7 @@ func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, 
 		"aud": "cbc-api",
 		"tid": tenantID,
 		"scp": scope,
+		"device_trust_level": trustLevel,
 	}
 
 	_, _, err := s.crypto.GenerateJWT(ctx, tenantID, claims)
@@ -228,5 +235,5 @@ func (s *tokenDomainService) CleanupExpiredTokens(ctx context.Context, before ti
 }
 
 func (s *tokenDomainService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
-	return s.generateAccessToken(ctx, tenantID, subject, scope)
+	return s.generateAccessToken(ctx, tenantID, subject, scope, "") // No trust level for client credentials flow
 }

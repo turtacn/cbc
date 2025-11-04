@@ -44,6 +44,7 @@ import (
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
 	redisInfra "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
+	"github.com/turtacn/cbc/internal/infrastructure/policy"
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
 	redisStore "github.com/turtacn/cbc/internal/infrastructure/redis"
 
@@ -80,6 +81,8 @@ type Application struct {
 	auditService domainService.AuditService
 	cryptoService domainService.CryptoService
 	rateLimitService domainService.RateLimitService
+	policyService domainService.PolicyService
+	mgrKeyFetcher domainService.MgrKeyFetcher
 	blacklistStore domainService.TokenBlacklistStore
 	metrics *monitoring.Metrics
 	tokenRepo repository.TokenRepository
@@ -239,6 +242,8 @@ func (app *Application) initDomainServices() error {
 
 	app.rateLimitService = &ratelimitadapter.ServiceAdapter{RL: app.rateLimiter}
 	app.blacklistStore = redisStore.NewTokenBlacklistStore(redisClient)
+	app.policyService = policy.NewStubPolicyService()
+	app.mgrKeyFetcher = kms.NewMgrKeyFetcher(app.vaultClient, redisClient)
 	app.logger.Info(app.ctx, "Domain services initialized via adapters")
 	return nil
 }
@@ -274,7 +279,7 @@ func (app *Application) initApplicationServices() error {
 
 	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
 	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.cryptoService, &app.config.OAuth)
-	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.logger)
+	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.config, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.cryptoService, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
 	return nil

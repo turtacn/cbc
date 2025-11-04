@@ -60,6 +60,7 @@ type ServerConfig struct {
 
 	TLS             TLSConfig     `mapstructure:"tls"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout" env:"CBC_AUTH_SHUTDOWN_TIMEOUT" default:"30s"`
+	IssuerURL       string        `mapstructure:"issuer_url" env:"CBC_AUTH_ISSUER_URL" default:"http://localhost:8080"`
 }
 
 // TLSConfig holds TLS/mTLS settings.

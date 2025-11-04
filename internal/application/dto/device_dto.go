@@ -59,6 +59,7 @@ type DeviceResponse struct {
 	IPAddress         string            `json:"ip_address,omitempty"`
 	UserAgent         string            `json:"user_agent,omitempty"`
 	Metadata          map[string]string `json:"metadata,omitempty"`
+	RefreshToken      string            `json:"refresh_token,omitempty"`
 }
 
 // DeviceListResponse 设备列表响应 DTO

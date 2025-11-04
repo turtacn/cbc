@@ -1,5 +1,9 @@
-package placeholder_test
+package application_test
 
-import "testing"
+import (
+	"testing"
+)
 
-func TestPlaceholder(t *testing.T) { t.Skip("placeholder - implement later") }
+func TestPlaceholder(t *testing.T) {
+	t.Skip("placeholder")
+}

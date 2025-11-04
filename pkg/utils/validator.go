@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"crypto/rand"
+	"encoding/base64"
 	"unicode"
 	"unicode/utf8"
 
@@ -823,6 +825,16 @@ func ValidateStruct(s interface{}) error {
 	// This is a placeholder implementation.
 	// In a real application, you would use a library like go-playground/validator.
 	return nil
+}
+
+// GenerateSecureRandomString generates a URL-safe, base64 encoded secure random string.
+func GenerateSecureRandomString(len int) (string, error) {
+	bytes := make([]byte, len)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
 //Personal.AI order the ending

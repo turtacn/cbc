@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/turtacn/cbc/internal/application"
+	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/tests/mocks"
 )
@@ -26,7 +26,7 @@ func TestOAuthHandler_StartDeviceAuthorization(t *testing.T) {
 	handler := handlers.NewOAuthHandler(mockAppService)
 
 	// Setup mock response
-	expectedResp := &application.DeviceFlowResponse{
+	expectedResp := &dto.DeviceFlowResponse{
 		DeviceCode:      "test_dc",
 		UserCode:        "test_uc",
 		VerificationURI: "https://example.com/verify",

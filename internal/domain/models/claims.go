@@ -8,4 +8,6 @@ type Claims struct {
 	TenantID string `json:"tenant_id"`
 	DeviceID string `json:"device_id"`
 	Scope    string `json:"scope"`
+	// DeviceTrustLevel is the trust level of the device.
+	DeviceTrustLevel string `json:"device_trust_level,omitempty"`
 }
