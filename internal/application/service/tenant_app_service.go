@@ -43,6 +43,7 @@ type TenantAppService interface {
 type tenantAppServiceImpl struct {
 	tenantRepo repository.TenantRepository
 	kms        service.KeyManagementService
+	cdnManager service.CDNCacheManager
 	logger     logger.Logger
 }
 
@@ -50,11 +51,13 @@ type tenantAppServiceImpl struct {
 func NewTenantAppService(
 	tenantRepo repository.TenantRepository,
 	kms service.KeyManagementService,
+	cdnManager service.CDNCacheManager,
 	logger logger.Logger,
 ) TenantAppService {
 	return &tenantAppServiceImpl{
 		tenantRepo: tenantRepo,
 		kms:        kms,
+		cdnManager: cdnManager,
 		logger:     logger,
 	}
 }
@@ -145,7 +148,7 @@ func (s *tenantAppServiceImpl) RotateTenantKey(ctx context.Context, tenantID str
 	oldKeyID := tenant.KeyRotationPolicy.ActiveKeyID
 
 	// 2. 使用领域服务轮换密钥
-	newKeyID, err := s.kms.RotateTenantKey(ctx, tenantID)
+	newKeyID, err := s.kms.RotateTenantKey(ctx, tenantID, s.cdnManager)
 	if err != nil {
 		s.logger.Error(ctx, "Failed to rotate key using crypto service", err,
 			logger.String("tenant_id", tenantID))
@@ -240,7 +243,7 @@ func (s *tenantAppServiceImpl) CreateTenant(ctx context.Context, req *dto.Create
 	tenantID := fmt.Sprintf("tenant-%d", time.Now().Unix())
 
 	// 使用领域服务生成初始密钥
-	newKeyID, err := s.kms.RotateTenantKey(ctx, tenantID)
+	newKeyID, err := s.kms.RotateTenantKey(ctx, tenantID, s.cdnManager)
 	if err != nil {
 		s.logger.Error(ctx, "Failed to generate initial key pair for new tenant", err,
 			logger.String("tenant_id", tenantID))

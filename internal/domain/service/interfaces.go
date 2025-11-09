@@ -21,9 +21,9 @@ type KeyProvider interface {
 //go:generate mockery --name KeyManagementService --output mocks --outpkg mocks
 // KeyManagementService defines the interface for managing the key lifecycle.
 type KeyManagementService interface {
-	RotateTenantKey(ctx context.Context, tenantID string) (string, error)
+	RotateTenantKey(ctx context.Context, tenantID string, cdnManager CDNCacheManager) (string, error)
 	GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error)
-	CompromiseKey(ctx context.Context, tenantID, kid, reason string) error
+	CompromiseKey(ctx context.Context, tenantID, kid, reason string, cdnManager CDNCacheManager) error
 	GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (tokenString, keyID string, err error)
 	VerifyJWT(ctx context.Context, tokenString, tenantID string) (jwt.MapClaims, error)
 }
@@ -82,4 +82,10 @@ type PolicyService interface {
 // MgrKeyFetcher defines the interface for fetching MGR public keys.
 type MgrKeyFetcher interface {
 	GetMgrPublicKey(ctx context.Context, clientID, kid string) (*rsa.PublicKey, error)
+}
+
+// CDNCacheManager defines the interface for CDN cache management.
+type CDNCacheManager interface {
+	PurgeTenantJWKS(ctx context.Context, tenantID string) error
+	PurgePath(ctx context.Context, path string) error
 }

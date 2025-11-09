@@ -123,8 +123,8 @@ func (m *MockKeyManagementService) VerifyJWT(ctx context.Context, tokenString st
 	return args.Get(0).(jwt.MapClaims), args.Error(1)
 }
 
-func (m *MockKeyManagementService) RotateTenantKey(ctx context.Context, tenantID string) (string, error) {
-	args := m.Called(ctx, tenantID)
+func (m *MockKeyManagementService) RotateTenantKey(ctx context.Context, tenantID string, cdnManager CDNCacheManager) (string, error) {
+	args := m.Called(ctx, tenantID, cdnManager)
 	return args.String(0), args.Error(1)
 }
 
@@ -136,8 +136,8 @@ func (m *MockKeyManagementService) GetTenantPublicKeys(ctx context.Context, tena
 	return args.Get(0).(map[string]*rsa.PublicKey), args.Error(1)
 }
 
-func (m *MockKeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string) error {
-	args := m.Called(ctx, tenantID, kid, reason)
+func (m *MockKeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string, cdnManager CDNCacheManager) error {
+	args := m.Called(ctx, tenantID, kid, reason, cdnManager)
 	return args.Error(0)
 }
 

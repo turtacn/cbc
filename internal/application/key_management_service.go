@@ -32,7 +32,7 @@ func NewKeyManagementService(keyProviders map[string]service.KeyProvider, keyRep
 }
 
 // RotateTenantKey rotates the key for a tenant.
-func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID string) (string, error) {
+func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID string, cdnManager service.CDNCacheManager) (string, error) {
 	provider, ok := s.keyProviders["vault"] // Assuming vault for now
 	if !ok {
 		return "", fmt.Errorf("no vault key provider configured")
@@ -87,6 +87,11 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 		}
 	}
 
+	if err := cdnManager.PurgeTenantJWKS(ctx, tenantID); err != nil {
+		s.logger.Error(ctx, "failed to purge cdn cache for tenant", err, logger.String("tenantID", tenantID))
+		// Do not return error, as the key rotation is already complete
+	}
+
 	return kid, nil
 }
 
@@ -125,8 +130,17 @@ func (s *KeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID
 }
 
 // CompromiseKey marks a key as compromised.
-func (s *KeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string) error {
-	return s.keyRepo.UpdateKeyStatus(ctx, tenantID, kid, "compromised")
+func (s *KeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string, cdnManager service.CDNCacheManager) error {
+	if err := s.keyRepo.UpdateKeyStatus(ctx, tenantID, kid, "compromised"); err != nil {
+		return err
+	}
+
+	if err := cdnManager.PurgeTenantJWKS(ctx, tenantID); err != nil {
+		s.logger.Error(ctx, "failed to purge cdn cache for tenant", err, logger.String("tenantID", tenantID))
+		// Do not return error, as the key is already compromised in the database
+	}
+
+	return nil
 }
 
 // GenerateJWT generates a JWT for a tenant.

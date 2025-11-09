@@ -2,7 +2,6 @@
 package unit
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"net/http"
@@ -15,70 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/turtacn/cbc/internal/domain/service/mocks"
 	"github.com/turtacn/cbc/internal/interfaces/http/middleware"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
 )
-
-type MockKeyManagementService struct {
-	mock.Mock
-}
-
-func (m *MockKeyManagementService) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockKeyManagementService) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockKeyManagementService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
-	args := m.Called(ctx, tenantID, claims)
-	return args.String(0), args.String(1), args.Error(2)
-}
-
-func (m *MockKeyManagementService) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
-	args := m.Called(ctx, tokenString, tenantID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(jwt.MapClaims), args.Error(1)
-}
-
-func (m *MockKeyManagementService) GetPublicKey(ctx context.Context, tenantID string, keyID string) (*rsa.PublicKey, error) {
-	args := m.Called(ctx, tenantID, keyID)
-	return args.Get(0).(*rsa.PublicKey), args.Error(1)
-}
-
-func (m *MockKeyManagementService) GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error) {
-	args := m.Called(ctx, tenantID)
-	return args.Get(0).(*rsa.PrivateKey), args.String(1), args.Error(2)
-}
-
-func (m *MockKeyManagementService) RotateKey(ctx context.Context, tenantID string) (string, error) {
-	args := m.Called(ctx, tenantID)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockKeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string) error {
-	args := m.Called(ctx, tenantID, kid, reason)
-	return args.Error(0)
-}
-
-func (m *MockKeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error) {
-	args := m.Called(ctx, tenantID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(map[string]*rsa.PublicKey), args.Error(1)
-}
-
-func (m *MockKeyManagementService) RotateTenantKey(ctx context.Context, tenantID string) (string, error) {
-	args := m.Called(ctx, tenantID)
-	return args.String(0), args.Error(1)
-}
 
 
 func TestRequireJWT(t *testing.T) {
@@ -86,7 +26,7 @@ func TestRequireJWT(t *testing.T) {
 	testLogger := logger.NewDefaultLogger()
 
 	// Mocks
-	mockKMS := new(MockKeyManagementService)
+	mockKMS := new(mocks.KeyManagementService)
 	mockBlacklist := new(MockBlacklistStore) // Reusing from app_auth_revoke_test
 
 	// Middleware to test

@@ -103,7 +103,7 @@ func TestKeyManagementService_CompromiseKey_PurgesCache(t *testing.T) {
 	mockCDNManager := new(MockCDNCacheManager)
 	log := logger.NewNoopLogger()
 
-	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, log)
+	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, mockCDNManager, log)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -116,7 +116,7 @@ func TestKeyManagementService_CompromiseKey_PurgesCache(t *testing.T) {
 	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(nil)
 
 	// Call the method
-	err = kms.CompromiseKey(ctx, tenantID, kid, reason, mockCDNManager)
+	err = kms.CompromiseKey(ctx, tenantID, kid, reason)
 
 	// Assert the results
 	assert.NoError(t, err)
@@ -134,7 +134,7 @@ func TestKeyManagementService_RotateTenantKey_PurgesCache(t *testing.T) {
 		"vault": mockKeyProvider,
 	}
 
-	kms, err := application.NewKeyManagementService(keyProviders, mockKeyRepo, log)
+	kms, err := application.NewKeyManagementService(keyProviders, mockKeyRepo, mockCDNManager, log)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -147,7 +147,7 @@ func TestKeyManagementService_RotateTenantKey_PurgesCache(t *testing.T) {
 	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(nil)
 
 	// Call the method
-	_, err = kms.RotateTenantKey(ctx, tenantID, mockCDNManager)
+	_, err = kms.RotateTenantKey(ctx, tenantID)
 
 	// Assert the results
 	assert.NoError(t, err)
@@ -160,7 +160,7 @@ func TestKeyManagementService_CompromiseKey_PurgeFails(t *testing.T) {
 	mockCDNManager := new(MockCDNCacheManager)
 	log := logger.NewNoopLogger()
 
-	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, log)
+	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, mockCDNManager, log)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -173,7 +173,7 @@ func TestKeyManagementService_CompromiseKey_PurgeFails(t *testing.T) {
 	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(errors.New("purge failed"))
 
 	// Call the method
-	err = kms.CompromiseKey(ctx, tenantID, kid, reason, mockCDNManager)
+	err = kms.CompromiseKey(ctx, tenantID, kid, reason)
 
 	// Assert the results
 	assert.NoError(t, err)

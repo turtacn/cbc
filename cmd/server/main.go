@@ -40,6 +40,7 @@ import (
 
 	// Infrastructure Layer
 	"github.com/turtacn/cbc/internal/infrastructure/audit"
+	"github.com/turtacn/cbc/internal/infrastructure/cdn"
 	"github.com/turtacn/cbc/internal/infrastructure/crypto"
 	"github.com/turtacn/cbc/internal/infrastructure/kms"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
@@ -81,6 +82,7 @@ type Application struct {
 	vaultClient *api.Client
 	auditService domainService.AuditService
 	kms domainService.KeyManagementService
+	cdnManager domainService.CDNCacheManager
 	rateLimitService domainService.RateLimitService
 	policyService domainService.PolicyService
 	mgrKeyFetcher domainService.MgrKeyFetcher
@@ -246,6 +248,15 @@ func (app *Application) initDomainServices() error {
 		return fmt.Errorf("failed to create key management service: %w", err)
 	}
 
+	if app.config.CDN.PurgeEnabled && app.config.CDN.Provider == "aws_cloudfront" {
+		app.cdnManager, err = cdn.NewAWSCloudFrontAdapter(app.ctx, app.config.CDN.DistributionID, app.logger)
+		if err != nil {
+			return fmt.Errorf("failed to create aws cloudfront adapter: %w", err)
+		}
+	} else {
+		app.cdnManager = cdn.NewStubAdapter(app.logger)
+	}
+
 	app.auditService, err = audit.NewKafkaProducer(app.config.Kafka, app.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create kafka producer: %w", err)
@@ -292,7 +303,7 @@ func (app *Application) initApplicationServices() error {
 	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
 	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.kms, &app.config.OAuth)
 	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.config, app.logger)
-	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.kms, app.logger)
+	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.kms, app.cdnManager, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
 	return nil
 }

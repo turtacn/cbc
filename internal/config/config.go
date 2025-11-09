@@ -21,6 +21,15 @@ type Config struct {
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Kafka         KafkaConfig         `mapstructure:"kafka"`
 	OAuth         OAuthConfig         `mapstructure:"oauth"`
+	CDN           CDNConfig           `mapstructure:"cdn"`
+}
+
+// CDNConfig holds settings for CDN cache management.
+type CDNConfig struct {
+	PurgeEnabled    bool   `mapstructure:"purge_enabled" env:"CBC_AUTH_CDN_PURGE_ENABLED" default:"false"`
+	Provider        string `mapstructure:"provider" env:"CBC_AUTH_CDN_PROVIDER" default:"stub"`
+	DistributionID  string `mapstructure:"distribution_id" env:"CBC_AUTH_CDN_DISTRIBUTION_ID"`
+	APITokenEnvVar  string `mapstructure:"api_token_env_var" env:"CBC_AUTH_CDN_API_TOKEN_ENV_VAR"`
 }
 
 // OAuthConfig holds settings for OAuth 2.0 features, including Device Authorization Grant.
@@ -205,6 +214,22 @@ func (c *Config) Validate() error {
 	}
 	if err := c.OAuth.Validate(); err != nil {
 		return fmt.Errorf("oauth config validation failed: %w", err)
+	}
+	if err := c.CDN.Validate(); err != nil {
+		return fmt.Errorf("cdn config validation failed: %w", err)
+	}
+	return nil
+}
+
+// Validate CDNConfig.
+func (c *CDNConfig) Validate() error {
+	if c.PurgeEnabled {
+		if c.Provider == "aws_cloudfront" && c.DistributionID == "" {
+			return fmt.Errorf("distribution ID is required for aws_cloudfront provider")
+		}
+		if c.Provider != "aws_cloudfront" && c.Provider != "stub" {
+			return fmt.Errorf("unsupported cdn provider: %s", c.Provider)
+		}
 	}
 	return nil
 }
