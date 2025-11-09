@@ -18,7 +18,7 @@ import (
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/tests/mocks"
+	"github.com/turtacn/cbc/internal/domain/service/mocks"
 )
 
 func TestAuthHttpSanity(t *testing.T) {
@@ -33,7 +33,7 @@ func TestAuthHttpSanity(t *testing.T) {
 	// Mocks
 	mockAuthApp := new(mocks.MockAuthAppService)
 	mockDeviceApp := new(mocks.MockDeviceAppService)
-	mockCrypto := new(mocks.MockCryptoService)
+	mockKMS := new(mocks.KeyManagementService)
 	mockRedis := new(mocks.MockRedisConnectionManager)
 
 	// Mock any necessary method calls to prevent panics
@@ -44,7 +44,7 @@ func TestAuthHttpSanity(t *testing.T) {
 	// Setup handlers
 	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
-	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
+	jwksHandler := handlers.NewJWKSHandler(mockKMS, log, metrics)
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 
 	// Setup router
@@ -100,9 +100,7 @@ func TestAuthHttpSanity(t *testing.T) {
 	// 5. GET /api/v1/auth/jwks/{tenant_id} -> 200
 	t.Run("GetJWKS", func(t *testing.T) {
 		pk, _ := rsa.GenerateKey(rand.Reader, 2048)
-		mockCrypto.On("GetPublicKey", mock.Anything, "t-1", "kid-1").Return(&pk.PublicKey, nil)
-		mockCrypto.On("GetPrivateKey", mock.Anything, "t-1").Return(pk, "kid-1", nil)
-
+		mockKMS.On("GetTenantPublicKeys", mock.Anything, "t-1").Return(map[string]*rsa.PublicKey{"kid-1": &pk.PublicKey}, nil)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/jwks/t-1", nil)
 		w := httptest.NewRecorder()
 		engine.ServeHTTP(w, req)

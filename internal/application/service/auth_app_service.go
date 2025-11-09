@@ -16,6 +16,7 @@ import (
 	"github.com/turtacn/cbc/pkg/utils"
 )
 
+//go:generate mockery --name AuthAppService --output ../../domain/service/mocks --outpkg mocks
 // AuthAppService defines the interface for authentication application service
 type AuthAppService interface {
 	// IssueToken issues a new token pair (access token + refresh token) for a device

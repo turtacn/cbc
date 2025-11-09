@@ -19,7 +19,7 @@ type DeviceAuthAppServiceTestSuite struct {
 	t *testing.T
 	mockDeviceAuthStore *mocks.DeviceAuthStore
 	mockTokenService    *mocks.TokenService
-	mockCryptoService   *mocks.CryptoService
+	mockKMS             *mocks.KeyManagementService
 	cfg                 *config.OAuthConfig
 	sut                 service.DeviceAuthAppService
 }
@@ -27,13 +27,13 @@ type DeviceAuthAppServiceTestSuite struct {
 func (s *DeviceAuthAppServiceTestSuite) SetupTest() {
 	s.mockDeviceAuthStore = new(mocks.DeviceAuthStore)
 	s.mockTokenService = new(mocks.TokenService)
-	s.mockCryptoService = new(mocks.CryptoService)
+	s.mockKMS = new(mocks.KeyManagementService)
 	s.cfg = &config.OAuthConfig{
 		DeviceAuthExpiresIn: 600 * time.Second,
 		DeviceAuthInterval:  5 * time.Second,
 		VerificationURI:     "https://example.com/verify",
 	}
-	s.sut = service.NewDeviceAuthAppService(s.mockDeviceAuthStore, s.mockTokenService, s.mockCryptoService, s.cfg)
+	s.sut = service.NewDeviceAuthAppService(s.mockDeviceAuthStore, s.mockTokenService, s.mockKMS, s.cfg)
 }
 
 func TestDeviceAuthAppService(t *testing.T) {
@@ -98,8 +98,8 @@ func (s *DeviceAuthAppServiceTestSuite) testPollDeviceTokenHappyPath(t *testing.
 	s.mockDeviceAuthStore.On("GetSessionByDeviceCode", ctx, deviceCode).Return(approvedSession, nil)
 	s.mockDeviceAuthStore.On("TouchPoll", ctx, deviceCode).Return(nil)
 	s.mockTokenService.On("IssueTokenPair", ctx, tenantID, subject, "", []string{scope}, mock.Anything).Return(refreshToken, accessToken, nil)
-	s.mockCryptoService.On("GenerateJWT", ctx, tenantID, mock.AnythingOfType("*models.Claims")).Return(accessTokenString, "kid", nil).Once()
-	s.mockCryptoService.On("GenerateJWT", ctx, tenantID, mock.AnythingOfType("*models.Claims")).Return(refreshTokenString, "kid", nil).Once()
+	s.mockKMS.On("GenerateJWT", ctx, tenantID, mock.AnythingOfType("*models.Claims")).Return(accessTokenString, "kid", nil).Once()
+	s.mockKMS.On("GenerateJWT", ctx, tenantID, mock.AnythingOfType("*models.Claims")).Return(refreshTokenString, "kid", nil).Once()
 	s.mockDeviceAuthStore.On("DenySession", ctx, userCode).Return(nil)
 
 	// Act

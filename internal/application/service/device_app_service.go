@@ -20,6 +20,7 @@ import (
 	"github.com/turtacn/cbc/pkg/utils"
 )
 
+//go:generate mockery --name DeviceAppService --output ../../domain/service/mocks --outpkg mocks
 // DeviceAppService defines the interface for device application service
 type DeviceAppService interface {
 	// RegisterDevice registers a new device in the system

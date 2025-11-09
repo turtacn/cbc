@@ -18,21 +18,21 @@ import (
 var _ TokenService = (*tokenDomainService)(nil)
 
 type tokenDomainService struct {
-	repo   repository.TokenRepository
-	crypto CryptoService
-	log    logger.Logger
+	repo repository.TokenRepository
+	kms  KeyManagementService
+	log  logger.Logger
 	// add cfg fields if needed later (TTL, etc.)
 }
 
 func NewTokenDomainService(
 	repo repository.TokenRepository,
-	crypto CryptoService,
+	kms KeyManagementService,
 	log logger.Logger,
 ) TokenService {
 	return &tokenDomainService{
-		repo:   repo,
-		crypto: crypto,
-		log:    log,
+		repo: repo,
+		kms:  kms,
+		log:  log,
 	}
 }
 
@@ -118,7 +118,7 @@ func (s *tokenDomainService) VerifyToken(
 	tokenType constants.TokenType, // or constants.TokenType depending on your interface
 	tenantID string,
 ) (*models.Token, error) {
-	claims, err := s.crypto.VerifyJWT(ctx, tokenString, tenantID)
+	claims, err := s.kms.VerifyJWT(ctx, tokenString, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, 
 		"device_trust_level": trustLevel,
 	}
 
-	_, _, err := s.crypto.GenerateJWT(ctx, tenantID, claims)
+	_, _, err := s.kms.GenerateJWT(ctx, tenantID, claims)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (s *tokenDomainService) generateRefreshToken(ctx context.Context, tenantID,
 		"scp": scope,
 	}
 
-	_, _, err := s.crypto.GenerateJWT(ctx, tenantID, claims)
+	_, _, err := s.kms.GenerateJWT(ctx, tenantID, claims)
 	if err != nil {
 		return nil, err
 	}

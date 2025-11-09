@@ -23,7 +23,7 @@ func extractBearer(authHeader string) string {
 }
 
 // RequireJWT is a middleware to protect routes that require a valid JWT.
-func RequireJWT(crypto service.CryptoService, bl service.TokenBlacklistStore, log logger.Logger) gin.HandlerFunc {
+func RequireJWT(kms service.KeyManagementService, bl service.TokenBlacklistStore, log logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := extractBearer(c.Request.Header.Get("Authorization"))
 		if tokenStr == "" {
@@ -54,8 +54,8 @@ func RequireJWT(crypto service.CryptoService, bl service.TokenBlacklistStore, lo
 			return
 		}
 
-		// Now, verify the token using the CryptoService, which will check the signature.
-		verifiedClaims, err := crypto.VerifyJWT(c.Request.Context(), tokenStr, tenantID)
+		// Now, verify the token using the KeyManagementService, which will check the signature.
+		verifiedClaims, err := kms.VerifyJWT(c.Request.Context(), tokenStr, tenantID)
 		if err != nil {
 			log.Warn(c, "JWT verification failed", logger.Error(err))
 			c.AbortWithStatus(http.StatusUnauthorized)

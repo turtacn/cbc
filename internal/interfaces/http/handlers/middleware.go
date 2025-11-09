@@ -22,7 +22,7 @@ import (
 // MiddlewareConfig holds dependencies for middlewares.
 type MiddlewareConfig struct {
 	RateLimitService service.RateLimitService
-	CryptoService    service.CryptoService // Use the domain service interface
+	KMS              service.KeyManagementService // Use the domain service interface
 	Logger           logger.Logger
 	Tracer           trace.Tracer
 }
@@ -129,7 +129,7 @@ func RateLimitMiddleware(rateLimitService service.RateLimitService, log logger.L
 }
 
 // AuthMiddleware validates JWTs and injects claims.
-func AuthMiddleware(cryptoService service.CryptoService, log logger.Logger) gin.HandlerFunc {
+func AuthMiddleware(kms service.KeyManagementService, log logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -146,7 +146,7 @@ func AuthMiddleware(cryptoService service.CryptoService, log logger.Logger) gin.
 
 		// The tenant ID might be available in the request path or claims, but for simplicity, we pass an empty string.
 		// A real implementation would need a strategy to determine the tenant context before verification.
-		claims, err := cryptoService.VerifyJWT(c.Request.Context(), tokenString, "")
+		claims, err := kms.VerifyJWT(c.Request.Context(), tokenString, "")
 		if err != nil {
 			log.Warn(c.Request.Context(), "JWT verification failed", logger.Error(err))
 			respondUnauthorized(c, "AUTHENTICATION_FAILED", err.Error())

@@ -17,7 +17,7 @@ import (
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/tests/mocks"
+	"github.com/turtacn/cbc/internal/domain/service/mocks"
 )
 
 func Test_Routes_Are_Mounted(t *testing.T) {
@@ -32,7 +32,7 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 
 	mockAuthApp := new(mocks.MockAuthAppService)
 	mockDeviceApp := new(mocks.MockDeviceAppService)
-	mockCrypto := new(mocks.MockCryptoService)
+	mockKMS := new(mocks.KeyManagementService)
 	mockRedis := new(mocks.MockRedisConnectionManager)
 
 	// Mock any necessary method calls to prevent panics
@@ -46,12 +46,11 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 	mockDeviceApp.On("RegisterDevice", mock.Anything, mock.Anything).Return(&dto.DeviceResponse{}, nil)
 	mockDeviceApp.On("GetDeviceInfo", mock.Anything, mock.Anything).Return(&dto.DeviceResponse{}, nil)
 	mockDeviceApp.On("UpdateDeviceInfo", mock.Anything, mock.Anything, mock.Anything).Return(&dto.DeviceResponse{}, nil)
-	mockCrypto.On("GetPrivateKey", mock.Anything, mock.Anything).Return(pk, "kid", nil)
-	mockCrypto.On("GetPublicKey", mock.Anything, mock.Anything, mock.Anything).Return(&pk.PublicKey, nil)
+	mockKMS.On("GetTenantPublicKeys", mock.Anything, mock.Anything).Return(map[string]*rsa.PublicKey{"kid-1": &pk.PublicKey}, nil)
 
 	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
 	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
-	jwksHandler := handlers.NewJWKSHandler(mockCrypto, log, metrics)
+	jwksHandler := handlers.NewJWKSHandler(mockKMS, log, metrics)
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 	oauthHandler := handlers.NewOAuthHandler(nil)
 

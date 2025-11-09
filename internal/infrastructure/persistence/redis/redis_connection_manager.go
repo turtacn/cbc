@@ -7,6 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+//go:generate mockery --name RedisConnectionManager --output ../../../domain/service/mocks --outpkg mocks
 // RedisConnectionManager defines the interface for managing Redis connections.
 // This allows for mocking in tests.
 type RedisConnectionManager interface {

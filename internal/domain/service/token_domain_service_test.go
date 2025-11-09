@@ -105,17 +105,17 @@ func (m *MockTokenRepository) UpdateLastUsedAt(ctx context.Context, jti string, 
 	return args.Error(0)
 }
 
-// MockCryptoService is a mock for the CryptoService
-type MockCryptoService struct {
+// MockKeyManagementService is a mock for the KeyManagementService
+type MockKeyManagementService struct {
 	mock.Mock
 }
 
-func (m *MockCryptoService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
+func (m *MockKeyManagementService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
 	args := m.Called(ctx, tenantID, claims)
 	return args.String(0), args.String(1), args.Error(2)
 }
 
-func (m *MockCryptoService) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
+func (m *MockKeyManagementService) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
 	args := m.Called(ctx, tokenString, tenantID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -123,77 +123,28 @@ func (m *MockCryptoService) VerifyJWT(ctx context.Context, tokenString string, t
 	return args.Get(0).(jwt.MapClaims), args.Error(1)
 }
 
-func (m *MockCryptoService) ParseJWT(tokenString string) (*jwt.Token, error) {
-	args := m.Called(tokenString)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*jwt.Token), args.Error(1)
-}
-
-func (m *MockCryptoService) GetPublicKey(ctx context.Context, tenantID string, keyID string) (*rsa.PublicKey, error) {
-	args := m.Called(ctx, tenantID, keyID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*rsa.PublicKey), args.Error(1)
-}
-
-func (m *MockCryptoService) GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error) {
-	args := m.Called(ctx, tenantID)
-	if args.Get(0) == nil {
-		return nil, "", args.Error(2)
-	}
-	return args.Get(0).(*rsa.PrivateKey), args.String(1), args.Error(2)
-}
-
-func (m *MockCryptoService) GetPublicKeyJWKS(ctx context.Context, tenantID string) (map[string]interface{}, error) {
-	args := m.Called(ctx, tenantID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(map[string]interface{}), args.Error(1)
-}
-
-func (m *MockCryptoService) RotateKey(ctx context.Context, tenantID string) (string, error) {
+func (m *MockKeyManagementService) RotateTenantKey(ctx context.Context, tenantID string) (string, error) {
 	args := m.Called(ctx, tenantID)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockCryptoService) RevokeKey(ctx context.Context, tenantID string, keyID string, reason string) error {
-	args := m.Called(ctx, tenantID, keyID, reason)
+func (m *MockKeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]*rsa.PublicKey), args.Error(1)
+}
+
+func (m *MockKeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string) error {
+	args := m.Called(ctx, tenantID, kid, reason)
 	return args.Error(0)
-}
-
-func (m *MockCryptoService) ValidateJWTHeader(header map[string]interface{}) (bool, error) {
-	args := m.Called(header)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *MockCryptoService) ValidateStandardClaims(claims jwt.MapClaims, clockSkew int64) (bool, error) {
-	args := m.Called(claims, clockSkew)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *MockCryptoService) ExtractKeyID(tokenString string) (string, error) {
-	args := m.Called(tokenString)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockCryptoService) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockCryptoService) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
-	args := m.Called(ctx, data)
-	return args.Get(0).([]byte), args.Error(1)
 }
 
 func TestTokenDomainService_RefreshToken(t *testing.T) {
 	mockRepo := new(MockTokenRepository)
-	mockCrypto := new(MockCryptoService)
-	service := NewTokenDomainService(mockRepo, mockCrypto, logger.NewDefaultLogger())
+	mockKMS := new(MockKeyManagementService)
+	service := NewTokenDomainService(mockRepo, mockKMS, logger.NewDefaultLogger())
 
 	ctx := context.Background()
 	refreshTokenString := "valid-refresh-token"
@@ -221,11 +172,11 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 		{
 			name: "Successfully refresh token",
 			setupMocks: func() {
-				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
+				mockKMS.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
 				mockRepo.On("FindByJTI", ctx, jti).Return(token, nil).Once()
 				mockRepo.On("IsRevoked", ctx, jti).Return(false, nil).Once()
-				mockCrypto.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-access-token", "new-key-id", nil).Once()
-				mockCrypto.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-refresh-token", "new-key-id", nil).Once()
+				mockKMS.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-access-token", "new-key-id", nil).Once()
+				mockKMS.On("GenerateJWT", ctx, tenantID, mock.Anything).Return("new-refresh-token", "new-key-id", nil).Once()
 				mockRepo.On("Revoke", ctx, jti, "rotated").Return(nil).Once()
 				mockRepo.On("Save", ctx, mock.AnythingOfType("*models.Token")).Return(nil).Once()
 			},
@@ -235,7 +186,7 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 			name: "Refresh token is expired",
 			setupMocks: func() {
 				expiredClaims := jwt.MapClaims{"exp": float64(now.Add(-1 * time.Minute).Unix())}
-				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(expiredClaims, errors.New("token is expired")).Once()
+				mockKMS.On("VerifyJWT", ctx, refreshTokenString, "").Return(expiredClaims, errors.New("token is expired")).Once()
 			},
 			wantErr:       true,
 			expectedError: customErr.ErrTokenExpired(string(constants.TokenTypeRefresh)),
@@ -243,7 +194,7 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 		{
 			name: "Refresh token has been revoked",
 			setupMocks: func() {
-				mockCrypto.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
+				mockKMS.On("VerifyJWT", ctx, refreshTokenString, "").Return(claims, nil).Once()
 				mockRepo.On("FindByJTI", ctx, jti).Return(token, nil).Once()
 				mockRepo.On("IsRevoked", ctx, jti).Return(true, nil).Once()
 			},
@@ -256,7 +207,7 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset mocks before each run
 			mockRepo.Mock = mock.Mock{}
-			mockCrypto.Mock = mock.Mock{}
+			mockKMS.Mock = mock.Mock{}
 			tt.setupMocks()
 
 			_, _, err := service.RefreshToken(ctx, refreshTokenString, nil)
@@ -268,7 +219,7 @@ func TestTokenDomainService_RefreshToken(t *testing.T) {
 			}
 
 			mockRepo.AssertExpectations(t)
-			mockCrypto.AssertExpectations(t)
+			mockKMS.AssertExpectations(t)
 		})
 	}
 }

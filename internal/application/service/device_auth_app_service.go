@@ -23,20 +23,20 @@ type DeviceAuthAppService interface {
 type deviceAuthAppServiceImpl struct {
 	deviceAuthStore service.DeviceAuthStore
 	tokenService    service.TokenService
-	cryptoService   service.CryptoService
+	kms             service.KeyManagementService
 	cfg             *config.OAuthConfig
 }
 
 func NewDeviceAuthAppService(
 	deviceAuthStore service.DeviceAuthStore,
 	tokenService service.TokenService,
-	cryptoService service.CryptoService,
+	kms service.KeyManagementService,
 	cfg *config.OAuthConfig,
 ) DeviceAuthAppService {
 	return &deviceAuthAppServiceImpl{
 		deviceAuthStore: deviceAuthStore,
 		tokenService:    tokenService,
-		cryptoService:   cryptoService,
+		kms:             kms,
 		cfg:             cfg,
 	}
 }
@@ -133,11 +133,11 @@ func (s *deviceAuthAppServiceImpl) PollDeviceToken(ctx context.Context, deviceCo
 		}
 
 		// Generate JWT strings
-		accessTokenString, _, err := s.cryptoService.GenerateJWT(ctx, session.TenantID, accessToken.ToClaims())
+		accessTokenString, _, err := s.kms.GenerateJWT(ctx, session.TenantID, accessToken.ToClaims())
 		if err != nil {
 			return nil, errors.ErrServerError("failed to generate access token string").WithCause(err)
 		}
-		refreshTokenString, _, err := s.cryptoService.GenerateJWT(ctx, session.TenantID, refreshToken.ToClaims())
+		refreshTokenString, _, err := s.kms.GenerateJWT(ctx, session.TenantID, refreshToken.ToClaims())
 		if err != nil {
 			return nil, errors.ErrServerError("failed to generate refresh token string").WithCause(err)
 		}

@@ -15,7 +15,7 @@ import (
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/tests/mocks"
+	"github.com/turtacn/cbc/internal/domain/service/mocks"
 )
 
 func TestAuthHandler_RefreshToken(t *testing.T) {

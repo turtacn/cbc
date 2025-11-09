@@ -7,6 +7,7 @@ import (
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 )
 
+//go:generate mockery --name HTTPMetrics --output ../../../domain/service/mocks --outpkg mocks
 type HTTPMetrics interface {
 	RecordRequestStart(ctx context.Context, route string)
 	RecordRequestDuration(ctx context.Context, route string, status int, d time.Duration)

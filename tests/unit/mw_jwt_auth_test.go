@@ -20,26 +20,26 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-type MockCryptoService struct {
+type MockKeyManagementService struct {
 	mock.Mock
 }
 
-func (m *MockCryptoService) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+func (m *MockKeyManagementService) EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
 	args := m.Called(ctx, data)
 	return args.Get(0).([]byte), args.Error(1)
 }
 
-func (m *MockCryptoService) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
+func (m *MockKeyManagementService) DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error) {
 	args := m.Called(ctx, data)
 	return args.Get(0).([]byte), args.Error(1)
 }
 
-func (m *MockCryptoService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
+func (m *MockKeyManagementService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
 	args := m.Called(ctx, tenantID, claims)
 	return args.String(0), args.String(1), args.Error(2)
 }
 
-func (m *MockCryptoService) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
+func (m *MockKeyManagementService) VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error) {
 	args := m.Called(ctx, tokenString, tenantID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -47,31 +47,50 @@ func (m *MockCryptoService) VerifyJWT(ctx context.Context, tokenString string, t
 	return args.Get(0).(jwt.MapClaims), args.Error(1)
 }
 
-func (m *MockCryptoService) GetPublicKey(ctx context.Context, tenantID string, keyID string) (*rsa.PublicKey, error) {
+func (m *MockKeyManagementService) GetPublicKey(ctx context.Context, tenantID string, keyID string) (*rsa.PublicKey, error) {
 	args := m.Called(ctx, tenantID, keyID)
 	return args.Get(0).(*rsa.PublicKey), args.Error(1)
 }
 
-func (m *MockCryptoService) GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error) {
+func (m *MockKeyManagementService) GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error) {
 	args := m.Called(ctx, tenantID)
 	return args.Get(0).(*rsa.PrivateKey), args.String(1), args.Error(2)
 }
 
-func (m *MockCryptoService) RotateKey(ctx context.Context, tenantID string) (string, error) {
+func (m *MockKeyManagementService) RotateKey(ctx context.Context, tenantID string) (string, error) {
 	args := m.Called(ctx, tenantID)
 	return args.String(0), args.Error(1)
 }
+
+func (m *MockKeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string) error {
+	args := m.Called(ctx, tenantID, kid, reason)
+	return args.Error(0)
+}
+
+func (m *MockKeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]*rsa.PublicKey), args.Error(1)
+}
+
+func (m *MockKeyManagementService) RotateTenantKey(ctx context.Context, tenantID string) (string, error) {
+	args := m.Called(ctx, tenantID)
+	return args.String(0), args.Error(1)
+}
+
 
 func TestRequireJWT(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	testLogger := logger.NewDefaultLogger()
 
 	// Mocks
-	mockCrypto := new(MockCryptoService)
+	mockKMS := new(MockKeyManagementService)
 	mockBlacklist := new(MockBlacklistStore) // Reusing from app_auth_revoke_test
 
 	// Middleware to test
-	authMiddleware := middleware.RequireJWT(mockCrypto, mockBlacklist, testLogger)
+	authMiddleware := middleware.RequireJWT(mockKMS, mockBlacklist, testLogger)
 
 	// Router setup
 	router := gin.New()
@@ -105,7 +124,7 @@ func TestRequireJWT(t *testing.T) {
 		tokenStr, err := token.SignedString(privateKey)
 		require.NoError(t, err)
 
-		mockCrypto.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(nil, errors.ErrTokenSignatureInvalid()).Once()
+		mockKMS.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(nil, errors.ErrTokenSignatureInvalid()).Once()
 
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
 		req.Header.Set("Authorization", "Bearer "+tokenStr)
@@ -114,7 +133,7 @@ func TestRequireJWT(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		mockCrypto.AssertExpectations(t)
+		mockKMS.AssertExpectations(t)
 	})
 
 	t.Run("token is revoked", func(t *testing.T) {
@@ -127,7 +146,7 @@ func TestRequireJWT(t *testing.T) {
 		tokenStr, err := token.SignedString(privateKey)
 		require.NoError(t, err)
 
-		mockCrypto.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(claims, nil).Once()
+		mockKMS.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(claims, nil).Once()
 		mockBlacklist.On("IsRevoked", mock.Anything, tenantID, jti).Return(true, nil).Once()
 
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -137,7 +156,7 @@ func TestRequireJWT(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		mockCrypto.AssertExpectations(t)
+		mockKMS.AssertExpectations(t)
 		mockBlacklist.AssertExpectations(t)
 	})
 
@@ -151,7 +170,7 @@ func TestRequireJWT(t *testing.T) {
 		tokenStr, err := token.SignedString(privateKey)
 		require.NoError(t, err)
 
-		mockCrypto.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(claims, nil).Once()
+		mockKMS.On("VerifyJWT", mock.Anything, tokenStr, tenantID).Return(claims, nil).Once()
 		mockBlacklist.On("IsRevoked", mock.Anything, tenantID, jti).Return(false, nil).Once()
 
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -161,7 +180,7 @@ func TestRequireJWT(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		mockCrypto.AssertExpectations(t)
+		mockKMS.AssertExpectations(t)
 		mockBlacklist.AssertExpectations(t)
 	})
 }

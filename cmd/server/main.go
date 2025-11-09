@@ -28,6 +28,7 @@ import (
 	ratelimitadapter "github.com/turtacn/cbc/internal/adapter/ratelimit"
 
 	// Application Layer
+	"github.com/turtacn/cbc/internal/application"
 	"github.com/turtacn/cbc/internal/application/service"
 
 	// Configuration
@@ -79,7 +80,7 @@ type Application struct {
 	rateLimiter *ratelimit.RedisRateLimiter
 	vaultClient *api.Client
 	auditService domainService.AuditService
-	cryptoService domainService.CryptoService
+	kms domainService.KeyManagementService
 	rateLimitService domainService.RateLimitService
 	policyService domainService.PolicyService
 	mgrKeyFetcher domainService.MgrKeyFetcher
@@ -88,6 +89,7 @@ type Application struct {
 	tokenRepo repository.TokenRepository
 	deviceRepo repository.DeviceRepository
 	tenantRepo repository.TenantRepository
+	keyRepo repository.KeyRepository
 	authAppService service.AuthAppService
 	deviceAppService service.DeviceAppService
 	deviceAuthAppService service.DeviceAuthAppService
@@ -230,9 +232,18 @@ func (app *Application) initDomainServices() error {
         return fmt.Errorf("unexpected redis client type: %T", app.redisClient.GetClient())
     }
 
-	app.cryptoService, err = kms.NewVaultAdapter(app.config.Vault, app.vaultClient, redisClient, app.logger)
+	vaultProvider, err := kms.NewVaultProvider(app.config.Vault, app.vaultClient, app.logger)
 	if err != nil {
-		return fmt.Errorf("failed to create vault adapter: %w", err)
+		return fmt.Errorf("failed to create vault provider: %w", err)
+	}
+
+	keyProviders := map[string]domainService.KeyProvider{
+		"vault": vaultProvider,
+	}
+
+	app.kms, err = application.NewKeyManagementService(keyProviders, app.keyRepo, app.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create key management service: %w", err)
 	}
 
 	app.auditService, err = audit.NewKafkaProducer(app.config.Kafka, app.logger)
@@ -264,12 +275,13 @@ func (app *Application) initRepositories() error {
 	app.tokenRepo = postgres.NewTokenRepository(db, app.logger)
 	app.deviceRepo = postgres.NewDeviceRepository(db, app.logger)
 	app.tenantRepo = postgres.NewTenantRepository(db, app.logger)
+	app.keyRepo = postgres.NewKeyRepository(db)
 	app.logger.Info(app.ctx, "Repositories initialized")
 	return nil
 }
 
 func (app *Application) initApplicationServices() error {
-	tokenDomainService := domainService.NewTokenDomainService(app.tokenRepo, app.cryptoService, app.logger)
+	tokenDomainService := domainService.NewTokenDomainService(app.tokenRepo, app.kms, app.logger)
 
 	redisClient, ok := app.redisClient.GetClient().(*redis.Client)
 	if !ok {
@@ -278,9 +290,9 @@ func (app *Application) initApplicationServices() error {
 	deviceAuthStore := redisStore.NewRedisDeviceAuthStore(redisClient)
 
 	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
-	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.cryptoService, &app.config.OAuth)
+	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.kms, &app.config.OAuth)
 	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.config, app.logger)
-	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.cryptoService, app.logger)
+	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.kms, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
 	return nil
 }
@@ -301,10 +313,10 @@ func (app *Application) initInterfaces() error {
 	oauthHandler := handlers.NewOAuthHandler(app.deviceAuthAppService)
 	deviceHandler := handlers.NewDeviceHandler(app.deviceAppService, metricsAdapter, app.logger)
 	healthHandler := handlers.NewHealthHandler(app.dbConn, app.redisClient, app.logger)
-	jwksHandler := handlers.NewJWKSHandler(app.cryptoService, app.logger, metricsAdapter)
+	jwksHandler := handlers.NewJWKSHandler(app.kms, app.logger, metricsAdapter)
 
 	// Middleware
-	authMiddleware := middleware.RequireJWT(app.cryptoService, app.blacklistStore, app.logger)
+	authMiddleware := middleware.RequireJWT(app.kms, app.blacklistStore, app.logger)
 	rateLimitMiddleware := middleware.RateLimitMiddleware(app.rateLimitService, &app.config.RateLimit, app.logger)
 	idempotencyMiddleware := middleware.IdempotencyMiddleware(app.redisClient.GetClient(), &app.config.Idempotency, app.logger)
 	observabilityMiddleware := middleware.ObservabilityMiddleware(otel.Tracer(ServiceName), app.metrics.HTTPRequestsTotal, app.metrics.HTTPRequestDuration)

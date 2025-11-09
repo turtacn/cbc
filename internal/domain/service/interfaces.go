@@ -9,15 +9,23 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 )
 
-// CryptoService defines the interface for cryptographic operations.
-type CryptoService interface {
-	EncryptSensitiveData(ctx context.Context, data []byte) ([]byte, error)
-	DecryptSensitiveData(ctx context.Context, data []byte) ([]byte, error)
-	GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (tokenString string, keyID string, err error)
-	VerifyJWT(ctx context.Context, tokenString string, tenantID string) (jwt.MapClaims, error)
-	GetPublicKey(ctx context.Context, tenantID string, keyID string) (*rsa.PublicKey, error)
-	GetPrivateKey(ctx context.Context, tenantID string) (*rsa.PrivateKey, string, error)
-	RotateKey(ctx context.Context, tenantID string) (string, error)
+// KeyProvider defines the interface for physical key operations.
+type KeyProvider interface {
+	GenerateKey(ctx context.Context, keySpec models.KeySpec) (kid, providerRef string, publicKey *rsa.PublicKey, err error)
+	Sign(ctx context.Context, providerRef string, digest []byte) (signature []byte, err error)
+	GetPublicKey(ctx context.Context, providerRef string) (*rsa.PublicKey, error)
+	Backup(ctx context.Context, providerRef string) (encryptedBlob []byte, err error)
+	Restore(ctx context.Context, encryptedBlob []byte) (providerRef string, err error)
+}
+
+//go:generate mockery --name KeyManagementService --output mocks --outpkg mocks
+// KeyManagementService defines the interface for managing the key lifecycle.
+type KeyManagementService interface {
+	RotateTenantKey(ctx context.Context, tenantID string) (string, error)
+	GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error)
+	CompromiseKey(ctx context.Context, tenantID, kid, reason string) error
+	GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (tokenString, keyID string, err error)
+	VerifyJWT(ctx context.Context, tokenString, tenantID string) (jwt.MapClaims, error)
 }
 
 // RateLimitDimension defines the logical type of rate limiting.
