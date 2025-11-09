@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
+	"github.com/turtacn/cbc/internal/interfaces/http/middleware"
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
@@ -111,7 +112,7 @@ func (r *Router) SetupRoutes() {
 			auth.POST("/token", r.authHandler.IssueToken)
 			auth.POST("/refresh", r.authHandler.RefreshToken)
 			auth.POST("/revoke", r.authHandler.RevokeToken)
-			auth.GET("/jwks/:tenant_id", r.jwksHandler.GetJWKS)
+			auth.GET("/jwks/:tenant_id", middleware.ETagCache(), r.jwksHandler.GetJWKS)
 		}
 		oauth := v1.Group("/oauth")
 		{
