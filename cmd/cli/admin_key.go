@@ -1,33 +1,19 @@
-// Package main provides the entry point for the admin CLI tool.
-package main
+package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "cbc-admin",
-	Short: "Admin CLI for the CBC service",
-}
-
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+var keyCmd = &cobra.Command{
+	Use:   "key",
+	Short: "Manage keys",
 }
 
 func init() {
 	// In a real application, you would initialize your services here.
 	// For this example, we'll use nil implementations.
-
-	keyCmd := &cobra.Command{
-		Use:   "key",
-		Short: "Manage keys",
-	}
 
 	rotateCmd := &cobra.Command{
 		Use:   "rotate",
@@ -88,5 +74,5 @@ func init() {
 	}
 
 	keyCmd.AddCommand(rotateCmd, compromiseCmd, backupCmd, restoreCmd)
-	rootCmd.AddCommand(keyCmd)
+	adminCmd.AddCommand(keyCmd)
 }

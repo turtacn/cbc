@@ -13,7 +13,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application"
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/internal/domain/repository"
 	"github.com/turtacn/cbc/internal/domain/service"
+	"github.com/turtacn/cbc/internal/domain/service/mocks"
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
@@ -98,12 +100,78 @@ func (m *MockCDNCacheManager) PurgePath(ctx context.Context, path string) error 
 	return args.Error(0)
 }
 
-func TestKeyManagementService_CompromiseKey_PurgesCache(t *testing.T) {
+type MockTenantRepository struct {
+	mock.Mock
+}
+
+func (m *MockTenantRepository) FindByID(ctx context.Context, tenantID string) (*models.Tenant, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Tenant), args.Error(1)
+}
+
+func (m *MockTenantRepository) Save(ctx context.Context, tenant *models.Tenant) error {
+	return nil
+}
+func (m *MockTenantRepository) Update(ctx context.Context, tenant *models.Tenant) error {
+	return nil
+}
+func (m *MockTenantRepository) FindByName(ctx context.Context, name string) (*models.Tenant, error) {
+	return nil, nil
+}
+func (m *MockTenantRepository) FindAll(ctx context.Context, limit, offset int) ([]*models.Tenant, int64, error) {
+	return nil, 0, nil
+}
+func (m *MockTenantRepository) FindActiveAll(ctx context.Context) ([]*models.Tenant, error) {
+	return nil, nil
+}
+func (m *MockTenantRepository) Exists(ctx context.Context, tenantID string) (bool, error) {
+	return false, nil
+}
+func (m *MockTenantRepository) UpdateStatus(ctx context.Context, tenantID string, status string) error {
+	return nil
+}
+func (m *MockTenantRepository) UpdateRateLimitConfig(ctx context.Context, tenantID string, config *models.RateLimitConfig) error {
+	return nil
+}
+func (m *MockTenantRepository) UpdateTokenTTLConfig(ctx context.Context, tenantID string, config *models.TokenTTLConfig) error {
+	return nil
+}
+func (m *MockTenantRepository) UpdateKeyRotationPolicy(ctx context.Context, tenantID string, policy *models.KeyRotationPolicy) error {
+	return nil
+}
+func (m *MockTenantRepository) Delete(ctx context.Context, tenantID string) error {
+	return nil
+}
+func (m *MockTenantRepository) GetTenantMetrics(ctx context.Context, tenantID string) (*repository.TenantMetrics, error) {
+	return nil, nil
+}
+func (m *MockTenantRepository) GetAllMetrics(ctx context.Context) (*repository.SystemMetrics, error) {
+	return nil, nil
+}
+func (m *MockTenantRepository) IncrementRequestCount(ctx context.Context, tenantID string, count int64) error {
+	return nil
+}
+func (m *MockTenantRepository) UpdateLastActivityAt(ctx context.Context, tenantID string, lastActivityAt time.Time) error {
+	return nil
+}
+
+func TestKeyManagementService_CompromiseKey_CallsKLR(t *testing.T) {
 	mockKeyRepo := new(MockKeyRepository)
 	mockCDNManager := new(MockCDNCacheManager)
+	mockKLR := new(mocks.KeyLifecycleRegistry)
 	log := logger.NewNoopLogger()
 
-	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, mockCDNManager, log)
+	kms, err := application.NewKeyManagementService(
+		nil,
+		mockKeyRepo,
+		nil, // tenantRepo not needed for this test
+		nil, // policyEngine not needed for this test
+		mockKLR,
+		log,
+	)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -113,70 +181,104 @@ func TestKeyManagementService_CompromiseKey_PurgesCache(t *testing.T) {
 
 	// Set up mock expectations
 	mockKeyRepo.On("UpdateKeyStatus", ctx, tenantID, kid, "compromised").Return(nil)
+	mockKLR.On("LogEvent", ctx, mock.AnythingOfType("models.KLREvent")).Return(nil)
 	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(nil)
 
 	// Call the method
-	err = kms.CompromiseKey(ctx, tenantID, kid, reason)
+	err = kms.CompromiseKey(ctx, tenantID, kid, reason, mockCDNManager)
 
 	// Assert the results
 	assert.NoError(t, err)
 	mockKeyRepo.AssertExpectations(t)
+	mockKLR.AssertExpectations(t)
 	mockCDNManager.AssertExpectations(t)
 }
 
-func TestKeyManagementService_RotateTenantKey_PurgesCache(t *testing.T) {
+func TestKeyManagementService_RotateTenantKey_ChecksPolicy(t *testing.T) {
 	mockKeyRepo := new(MockKeyRepository)
 	mockCDNManager := new(MockCDNCacheManager)
 	mockKeyProvider := new(MockKeyProvider)
+	mockPolicyEngine := new(mocks.PolicyEngine)
+	mockKLR := new(mocks.KeyLifecycleRegistry)
+	mockTenantRepo := new(MockTenantRepository)
 	log := logger.NewNoopLogger()
 
 	keyProviders := map[string]service.KeyProvider{
 		"vault": mockKeyProvider,
 	}
 
-	kms, err := application.NewKeyManagementService(keyProviders, mockKeyRepo, mockCDNManager, log)
+	kms, err := application.NewKeyManagementService(
+		keyProviders,
+		mockKeyRepo,
+		mockTenantRepo,
+		mockPolicyEngine,
+		mockKLR,
+		log,
+	)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
 	tenantID := "test-tenant"
 
 	// Set up mock expectations
+	mockTenantRepo.On("FindByID", ctx, tenantID).Return(&models.Tenant{TenantID: tenantID, ComplianceClass: "L1"}, nil)
+	mockPolicyEngine.On("CheckKeyGeneration", ctx, mock.AnythingOfType("models.PolicyRequest")).Return(nil)
 	mockKeyRepo.On("CreateKey", ctx, mock.AnythingOfType("*models.Key")).Return(nil)
+	mockKLR.On("LogEvent", ctx, mock.AnythingOfType("models.KLREvent")).Return(nil)
 	mockKeyRepo.On("GetActiveKeys", ctx, tenantID).Return([]*models.Key{}, nil)
 	mockKeyRepo.On("GetDeprecatedKeys", ctx, tenantID).Return([]*models.Key{}, nil)
 	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(nil)
 
 	// Call the method
-	_, err = kms.RotateTenantKey(ctx, tenantID)
+	_, err = kms.RotateTenantKey(ctx, tenantID, mockCDNManager)
 
 	// Assert the results
 	assert.NoError(t, err)
+	mockTenantRepo.AssertExpectations(t)
+	mockPolicyEngine.AssertExpectations(t)
 	mockKeyRepo.AssertExpectations(t)
+	mockKLR.AssertExpectations(t)
 	mockCDNManager.AssertExpectations(t)
 }
 
-func TestKeyManagementService_CompromiseKey_PurgeFails(t *testing.T) {
+func TestKeyManagementService_RotateTenantKey_PolicyFails(t *testing.T) {
 	mockKeyRepo := new(MockKeyRepository)
 	mockCDNManager := new(MockCDNCacheManager)
+	mockKeyProvider := new(MockKeyProvider)
+	mockPolicyEngine := new(mocks.PolicyEngine)
+	mockKLR := new(mocks.KeyLifecycleRegistry)
+	mockTenantRepo := new(MockTenantRepository)
 	log := logger.NewNoopLogger()
 
-	kms, err := application.NewKeyManagementService(nil, mockKeyRepo, mockCDNManager, log)
+	keyProviders := map[string]service.KeyProvider{
+		"vault": mockKeyProvider,
+	}
+
+	kms, err := application.NewKeyManagementService(
+		keyProviders,
+		mockKeyRepo,
+		mockTenantRepo,
+		mockPolicyEngine,
+		mockKLR,
+		log,
+	)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
 	tenantID := "test-tenant"
-	kid := "test-kid"
-	reason := "test-reason"
 
 	// Set up mock expectations
-	mockKeyRepo.On("UpdateKeyStatus", ctx, tenantID, kid, "compromised").Return(nil)
-	mockCDNManager.On("PurgeTenantJWKS", ctx, tenantID).Return(errors.New("purge failed"))
+	mockTenantRepo.On("FindByID", ctx, tenantID).Return(&models.Tenant{TenantID: tenantID, ComplianceClass: "L1"}, nil)
+	mockPolicyEngine.On("CheckKeyGeneration", ctx, mock.AnythingOfType("models.PolicyRequest")).Return(errors.New("policy violation"))
 
 	// Call the method
-	err = kms.CompromiseKey(ctx, tenantID, kid, reason)
+	_, err = kms.RotateTenantKey(ctx, tenantID, mockCDNManager)
 
 	// Assert the results
-	assert.NoError(t, err)
-	mockKeyRepo.AssertExpectations(t)
-	mockCDNManager.AssertExpectations(t)
+	assert.Error(t, err)
+	mockTenantRepo.AssertExpectations(t)
+	mockPolicyEngine.AssertExpectations(t)
+	mockKeyRepo.AssertNotCalled(t, "CreateKey")
+	mockKLR.AssertNotCalled(t, "LogEvent")
+	mockCDNManager.AssertNotCalled(t, "PurgeTenantJWKS")
 }

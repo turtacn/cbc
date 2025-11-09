@@ -45,6 +45,7 @@ import (
 	"github.com/turtacn/cbc/internal/infrastructure/kms"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
 	"github.com/turtacn/cbc/internal/infrastructure/persistence/postgres"
+	infraPostgres "github.com/turtacn/cbc/internal/infrastructure/postgres"
 	redisInfra "github.com/turtacn/cbc/internal/infrastructure/persistence/redis"
 	"github.com/turtacn/cbc/internal/infrastructure/policy"
 	"github.com/turtacn/cbc/internal/infrastructure/ratelimit"
@@ -243,7 +244,13 @@ func (app *Application) initDomainServices() error {
 		"vault": vaultProvider,
 	}
 
-	app.kms, err = application.NewKeyManagementService(keyProviders, app.keyRepo, app.logger)
+	klr := infraPostgres.NewKLRRepository(app.dbConn.DB())
+	policyEngine, err := policy.NewStaticPolicyEngine(app.config.Policy.PolicyFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create policy engine: %w", err)
+	}
+
+	app.kms, err = application.NewKeyManagementService(keyProviders, app.keyRepo, app.tenantRepo, policyEngine, klr, app.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create key management service: %w", err)
 	}

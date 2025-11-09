@@ -19,26 +19,60 @@ import (
 type KeyManagementService struct {
 	keyProviders map[string]service.KeyProvider
 	keyRepo      repository.KeyRepository
+	tenantRepo   repository.TenantRepository
+	policyEngine service.PolicyEngine
+	klr          service.KeyLifecycleRegistry
 	logger       logger.Logger
 }
 
 // NewKeyManagementService creates a new KeyManagementService.
-func NewKeyManagementService(keyProviders map[string]service.KeyProvider, keyRepo repository.KeyRepository, logger logger.Logger) (service.KeyManagementService, error) {
+func NewKeyManagementService(
+	keyProviders map[string]service.KeyProvider,
+	keyRepo repository.KeyRepository,
+	tenantRepo repository.TenantRepository,
+	policyEngine service.PolicyEngine,
+	klr service.KeyLifecycleRegistry,
+	logger logger.Logger,
+) (service.KeyManagementService, error) {
 	return &KeyManagementService{
 		keyProviders: keyProviders,
 		keyRepo:      keyRepo,
+		tenantRepo:   tenantRepo,
+		policyEngine: policyEngine,
+		klr:          klr,
 		logger:       logger.WithComponent("KeyManagementService"),
 	}, nil
 }
 
 // RotateTenantKey rotates the key for a tenant.
 func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID string, cdnManager service.CDNCacheManager) (string, error) {
+	tenant, err := s.tenantRepo.FindByID(ctx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get tenant: %w", err)
+	}
+
+	keySize := 2048 // Default key size
+	if tenant.ComplianceClass == "L3" {
+		keySize = 4096
+	} else if tenant.ComplianceClass == "L2" {
+		keySize = 3072
+	}
+
+	policyRequest := models.PolicyRequest{
+		ComplianceClass: tenant.ComplianceClass,
+		KeySize:         keySize,
+	}
+
+	if err := s.policyEngine.CheckKeyGeneration(ctx, policyRequest); err != nil {
+		return "", fmt.Errorf("policy check failed: %w", err)
+	}
+
 	provider, ok := s.keyProviders["vault"] // Assuming vault for now
 	if !ok {
 		return "", fmt.Errorf("no vault key provider configured")
 	}
 
-	kid, providerRef, publicKey, err := provider.GenerateKey(ctx, models.KeySpec{Algorithm: "RSA", Bits: 2048})
+	kid, providerRef, publicKey, err := provider.GenerateKey(ctx, models.KeySpec{Algorithm: "RSA", Bits: keySize})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate new key: %w", err)
 	}
@@ -59,6 +93,16 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 
 	if err := s.keyRepo.CreateKey(ctx, newKey); err != nil {
 		return "", fmt.Errorf("failed to save new key: %w", err)
+	}
+
+	klrEvent := models.KLREvent{
+		KeyID:    kid,
+		TenantID: tenantID,
+		Status:   "CREATED",
+	}
+	if err := s.klr.LogEvent(ctx, klrEvent); err != nil {
+		s.logger.Error(ctx, "failed to log key creation event", err, logger.String("kid", kid))
+		// Do not return error, as the key is already created
 	}
 
 	deprecatedKeys, err := s.keyRepo.GetActiveKeys(ctx, tenantID)
@@ -133,6 +177,17 @@ func (s *KeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID
 func (s *KeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string, cdnManager service.CDNCacheManager) error {
 	if err := s.keyRepo.UpdateKeyStatus(ctx, tenantID, kid, "compromised"); err != nil {
 		return err
+	}
+
+	klrEvent := models.KLREvent{
+		KeyID:    kid,
+		TenantID: tenantID,
+		Status:   "COMPROMISED",
+		Metadata: fmt.Sprintf(`{"reason": "%s"}`, reason),
+	}
+	if err := s.klr.LogEvent(ctx, klrEvent); err != nil {
+		s.logger.Error(ctx, "failed to log key compromise event", err, logger.String("kid", kid))
+		// Do not return error, as the key is already compromised in the database
 	}
 
 	if err := cdnManager.PurgeTenantJWKS(ctx, tenantID); err != nil {

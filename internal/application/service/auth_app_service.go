@@ -140,7 +140,7 @@ func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regist
 		s.auditService.LogEvent(ctx, models.AuditEvent{
 			EventType: "device.register",
 			TenantID:  req.TenantID,
-			DeviceID:  req.AgentID,
+			Actor:     req.AgentID,
 			Success:   true,
 		})
 	}
@@ -235,7 +235,7 @@ func (s *authAppServiceImpl) IssueToken(ctx context.Context, req *dto.IssueToken
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "token.issue",
 		TenantID:  req.TenantID,
-		DeviceID:  req.AgentID,
+		Actor:     req.AgentID,
 		Success:   true,
 	})
 	s.logger.Info(ctx, "Token issuance successful",
@@ -320,7 +320,7 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "token.refresh",
 		TenantID:  refreshToken.TenantID,
-		DeviceID:  refreshToken.DeviceID,
+		Actor:     refreshToken.DeviceID,
 		Success:   true,
 		Details:   fmt.Sprintf("Old JTI: %s", refreshToken.JTI),
 	})
@@ -366,7 +366,7 @@ func (s *authAppServiceImpl) RevokeToken(ctx context.Context, req *dto.RevokeTok
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "token.revoke",
 		TenantID:  token.TenantID,
-		DeviceID:  token.DeviceID,
+		Actor:     token.DeviceID,
 		Success:   true,
 		Details:   fmt.Sprintf("JTI: %s, Reason: %s", token.JTI, req.Reason),
 	})

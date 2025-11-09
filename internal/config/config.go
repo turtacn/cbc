@@ -22,6 +22,18 @@ type Config struct {
 	Kafka         KafkaConfig         `mapstructure:"kafka"`
 	OAuth         OAuthConfig         `mapstructure:"oauth"`
 	CDN           CDNConfig           `mapstructure:"cdn"`
+	Audit         AuditConfig         `mapstructure:"audit"`
+	Policy        PolicyConfig        `mapstructure:"policy"`
+}
+
+// AuditConfig holds settings for audit logging.
+type AuditConfig struct {
+	SecretKey string `yaml:"-" env:"AUDIT_HMAC_SECRET,required"`
+}
+
+// PolicyConfig holds settings for the policy engine.
+type PolicyConfig struct {
+	PolicyFilePath string `mapstructure:"policyFilePath"`
 }
 
 // CDNConfig holds settings for CDN cache management.
@@ -217,6 +229,28 @@ func (c *Config) Validate() error {
 	}
 	if err := c.CDN.Validate(); err != nil {
 		return fmt.Errorf("cdn config validation failed: %w", err)
+	}
+	if err := c.Audit.Validate(); err != nil {
+		return fmt.Errorf("audit config validation failed: %w", err)
+	}
+	if err := c.Policy.Validate(); err != nil {
+		return fmt.Errorf("policy config validation failed: %w", err)
+	}
+	return nil
+}
+
+// Validate AuditConfig.
+func (a *AuditConfig) Validate() error {
+	if a.SecretKey == "" {
+		return fmt.Errorf("audit secret key is required (AUDIT_HMAC_SECRET)")
+	}
+	return nil
+}
+
+// Validate PolicyConfig.
+func (p *PolicyConfig) Validate() error {
+	if p.PolicyFilePath == "" {
+		return fmt.Errorf("policy file path is required")
 	}
 	return nil
 }

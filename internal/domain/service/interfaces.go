@@ -89,3 +89,15 @@ type CDNCacheManager interface {
 	PurgeTenantJWKS(ctx context.Context, tenantID string) error
 	PurgePath(ctx context.Context, path string) error
 }
+
+//go:generate mockery --name KeyLifecycleRegistry --output mocks --outpkg mocks
+// KeyLifecycleRegistry defines the interface for logging key lifecycle events.
+type KeyLifecycleRegistry interface {
+	LogEvent(ctx context.Context, event models.KLREvent) error
+}
+
+//go:generate mockery --name PolicyEngine --output mocks --outpkg mocks
+// PolicyEngine defines the interface for checking policies.
+type PolicyEngine interface {
+	CheckKeyGeneration(ctx context.Context, policy models.PolicyRequest) error
+}

@@ -1,0 +1,4 @@
+L1:
+  minKeySize: 2048
+L3:
+  minKeySize: 4096

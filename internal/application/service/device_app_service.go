@@ -121,7 +121,7 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "device.register",
 		TenantID:  req.TenantID,
-		DeviceID:  req.AgentID,
+		Actor:     req.AgentID,
 		Success:   true,
 		Details:   fmt.Sprintf("Device Type: %s, Trust Level: %s", req.DeviceType, device.TrustLevel),
 	})
@@ -268,7 +268,7 @@ func (s *deviceAppServiceImpl) DeactivateDevice(ctx context.Context, agentID str
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "device.deactivate",
 		TenantID:  device.TenantID,
-		DeviceID:  agentID,
+		Actor:     agentID,
 		Success:   true,
 		Details:   fmt.Sprintf("Reason: %s", reason),
 	})

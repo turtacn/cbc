@@ -18,6 +18,9 @@ type Tenant struct {
 	// TenantName is the display name of the tenant organization
 	TenantName string `json:"tenant_name" db:"tenant_name"`
 
+	// ComplianceClass is the compliance class of the tenant
+	ComplianceClass string `json:"compliance_class" db:"compliance_class"`
+
 	// Status indicates the current status of the tenant (active, suspended, deleted)
 	Status constants.TenantStatus `json:"status" db:"status"`
 

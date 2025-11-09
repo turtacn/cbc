@@ -1,0 +1,39 @@
+# config/config.yaml
+
+server:
+  http_host: 0.0.0.0
+  http_port: 8080
+  issuer_url: "http://localhost:8080"
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "user"
+  password: "password"
+  database: "database"
+
+redis:
+  address: "localhost:6379"
+
+policy:
+  policyFilePath: "./config/policies.yaml"
+
+oauth:
+  verification_uri: "http://localhost:8080/verify"
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  audit_topic: "audit-logs"
+
+jwt:
+  issuer: "cbc-auth"
+  access_token_ttl: "15m"
+  refresh_token_ttl: "24h"
+
+cdn:
+  purge_enabled: false
+  provider: "stub"
+
+vault:
+  address: "http://localhost:8200"
