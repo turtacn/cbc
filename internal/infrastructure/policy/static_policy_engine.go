@@ -17,7 +17,8 @@ type StaticPolicyEngine struct {
 
 // KeyPolicy defines the policy for a compliance class.
 type KeyPolicy struct {
-	MinKeySize int `yaml:"minKeySize"`
+	MinKeySize           int     `yaml:"minKeySize"`
+	BlockOnAnomalyScore float64 `yaml:"blockOnAnomalyScore"`
 }
 
 // NewStaticPolicyEngine creates a new StaticPolicyEngine.
@@ -45,6 +46,14 @@ func (e *StaticPolicyEngine) CheckKeyGeneration(ctx context.Context, policyReque
 	if policyRequest.KeySize < policy.MinKeySize {
 		return fmt.Errorf("key size %d is less than the minimum required size %d for compliance class %s",
 			policyRequest.KeySize, policy.MinKeySize, policyRequest.ComplianceClass)
+	}
+
+	// Phase 11: Dynamic risk-based policy
+	if policyRequest.CurrentRiskProfile != nil &&
+		policy.BlockOnAnomalyScore > 0 && // Ensure the policy has a threshold set
+		policyRequest.CurrentRiskProfile.AnomalyScore >= policy.BlockOnAnomalyScore {
+		return fmt.Errorf("policy violation: high anomaly score (%f) detected, exceeding threshold of %f",
+			policyRequest.CurrentRiskProfile.AnomalyScore, policy.BlockOnAnomalyScore)
 	}
 
 	return nil

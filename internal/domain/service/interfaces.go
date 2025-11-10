@@ -9,6 +9,7 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 )
 
+//go:generate mockery --name KeyProvider --output mocks --outpkg mocks
 // KeyProvider defines the interface for physical key operations.
 type KeyProvider interface {
 	GenerateKey(ctx context.Context, keySpec models.KeySpec) (kid, providerRef string, publicKey *rsa.PublicKey, err error)
@@ -100,4 +101,10 @@ type KeyLifecycleRegistry interface {
 // PolicyEngine defines the interface for checking policies.
 type PolicyEngine interface {
 	CheckKeyGeneration(ctx context.Context, policy models.PolicyRequest) error
+}
+
+//go:generate mockery --name RiskOracle --output mocks --outpkg mocks
+// RiskOracle defines the interface for obtaining tenant risk profiles.
+type RiskOracle interface {
+	GetTenantRisk(ctx context.Context, tenantID string) (*models.TenantRiskProfile, error)
 }

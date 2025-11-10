@@ -52,10 +52,14 @@ L3:
 	keyRepo := postgres.NewKeyRepository(db)
 	tenantRepo := postgres.NewTenantRepository(db, log)
 	klr := infraPostgres.NewKLRRepository(db)
+	riskRepo := infraPostgres.NewPostgresRiskRepository(db)
 
 	// Create the policy engine
 	policyEngine, err := policy.NewStaticPolicyEngine(policyFile.Name())
 	assert.NoError(t, err)
+
+	// Create the risk oracle
+	riskOracle := application.NewRiskOracle(riskRepo)
 
 	// Create the key management service
 	kms, err := application.NewKeyManagementService(
@@ -65,6 +69,7 @@ L3:
 		policyEngine,
 		klr,
 		log,
+		riskOracle,
 	)
 	assert.NoError(t, err)
 

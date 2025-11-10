@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 )
 
 func TestAuditKafkaIntegration(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TESTS") != "" {
+		t.Skip("Skipping Docker-dependent tests")
+	}
 	cfg := config.KafkaConfig{
 		Brokers:    []string{kafkaBroker},
 		AuditTopic: auditTopic,

@@ -22,6 +22,7 @@ type KeyManagementService struct {
 	tenantRepo   repository.TenantRepository
 	policyEngine service.PolicyEngine
 	klr          service.KeyLifecycleRegistry
+	riskOracle   service.RiskOracle
 	logger       logger.Logger
 }
 
@@ -33,6 +34,7 @@ func NewKeyManagementService(
 	policyEngine service.PolicyEngine,
 	klr service.KeyLifecycleRegistry,
 	logger logger.Logger,
+	riskOracle service.RiskOracle,
 ) (service.KeyManagementService, error) {
 	return &KeyManagementService{
 		keyProviders: keyProviders,
@@ -40,6 +42,7 @@ func NewKeyManagementService(
 		tenantRepo:   tenantRepo,
 		policyEngine: policyEngine,
 		klr:          klr,
+		riskOracle:   riskOracle,
 		logger:       logger.WithComponent("KeyManagementService"),
 	}, nil
 }
@@ -58,9 +61,15 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 		keySize = 3072
 	}
 
+	riskProfile, err := s.riskOracle.GetTenantRisk(ctx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get tenant risk profile: %w", err)
+	}
+
 	policyRequest := models.PolicyRequest{
-		ComplianceClass: tenant.ComplianceClass,
-		KeySize:         keySize,
+		ComplianceClass:    tenant.ComplianceClass,
+		KeySize:            keySize,
+		CurrentRiskProfile: riskProfile,
 	}
 
 	if err := s.policyEngine.CheckKeyGeneration(ctx, policyRequest); err != nil {

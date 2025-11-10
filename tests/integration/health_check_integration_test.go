@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -22,6 +23,10 @@ import (
 )
 
 func TestHealthCheckIntegration(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TESTS") != "" {
+		t.Skip("Skipping Docker-dependent tests")
+	}
+
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}

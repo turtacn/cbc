@@ -15,7 +15,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"os"
 )
+
+func requireDockerOrSkip(t *testing.T) {
+	t.Helper()
+	if _, err := os.Stat("/var/run/docker.sock"); err != nil {
+		t.Skip("Docker socket not accessible; skipping integration test")
+	}
+}
 
 func setupVault(ctx context.Context, t *testing.T) (*api.Client, testcontainers.Container) {
 	req := testcontainers.ContainerRequest{
@@ -76,6 +84,9 @@ func setupRedis(ctx context.Context, t *testing.T) (*redis.Client, testcontainer
 }
 
 func TestMgrKeyFetcher_Integration(t *testing.T) {
+	if os.Getenv("SKIP_DOCKER_TESTS") != "" {
+		t.Skip("Skipping Docker-dependent tests")
+	}
 	ctx := context.Background()
 	vaultClient, vaultC := setupVault(ctx, t)
 	defer vaultC.Terminate(ctx)

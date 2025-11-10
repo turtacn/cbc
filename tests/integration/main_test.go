@@ -17,6 +17,14 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	// If the skip flag is set, run the tests without setting up Docker.
+	// Individual tests are responsible for skipping themselves.
+	if os.Getenv("SKIP_DOCKER_TESTS") != "" {
+		log.Println("SKIP_DOCKER_TESTS is set, skipping Docker setup for integration tests.")
+		code := m.Run()
+		os.Exit(code)
+	}
+
 	pool, err := dockertest.NewPool("")
 	if err != nil {
 		log.Fatalf("Could not connect to docker: %s", err)

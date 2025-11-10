@@ -68,6 +68,7 @@ type KafkaConfig struct {
 type ServerConfig struct {
 	HTTPHost         string        `mapstructure:"http_host" env:"CBC_AUTH_HTTP_HOST" default:"0.0.0.0"`
 	HTTPPort         int           `mapstructure:"http_port" env:"CBC_AUTH_HTTP_PORT" default:"8080"`
+	InternalHTTPPort int           `mapstructure:"internal_http_port" env:"CBC_AUTH_INTERNAL_HTTP_PORT" default:"9091"`
 	HTTPReadTimeout  time.Duration `mapstructure:"http_read_timeout" env:"CBC_AUTH_HTTP_READ_TIMEOUT" default:"30s"`
 	HTTPWriteTimeout time.Duration `mapstructure:"http_write_timeout" env:"CBC_AUTH_HTTP_WRITE_TIMEOUT" default:"30s"`
 	HTTPIdleTimeout  time.Duration `mapstructure:"http_idle_timeout" env:"CBC_AUTH_HTTP_IDLE_TIMEOUT" default:"120s"`

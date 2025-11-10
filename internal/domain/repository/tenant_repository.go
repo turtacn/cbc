@@ -10,6 +10,7 @@ import (
 	"github.com/turtacn/cbc/pkg/constants"
 )
 
+//go:generate mockery --name TenantRepository --output mocks --outpkg mocks
 // TenantRepository 定义租户仓储接口
 // 该接口定义了租户领域对象的持久化操作契约
 // 实现类：internal/infrastructure/persistence/postgres/tenant_repo_impl.go

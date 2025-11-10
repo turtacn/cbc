@@ -9,8 +9,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
-	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -20,7 +20,7 @@ import (
 )
 
 // Helper function to generate a self-signed certificate
-func generateSelfSignedCert(t *testing.T) (string, string) {
+func generateSelfSignedCert(t *testing.T) (string, string, *x509.Certificate, *rsa.PrivateKey) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
@@ -33,12 +33,14 @@ func generateSelfSignedCert(t *testing.T) (string, string) {
 		NotAfter:  time.Now().Add(time.Hour),
 
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost"},
+		DNSNames:              []string{"localhost", "127.0.0.1"},
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(derBytes)
 	require.NoError(t, err)
 
 	certOut, err := os.CreateTemp("", "cert.pem")
@@ -51,55 +53,36 @@ func generateSelfSignedCert(t *testing.T) (string, string) {
 	defer keyOut.Close()
 	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 
-	return certOut.Name(), keyOut.Name()
+	return certOut.Name(), keyOut.Name(), cert, priv
 }
 
 func TestTLSIntegration(t *testing.T) {
-	certFile, keyFile := generateSelfSignedCert(t)
-	defer os.Remove(certFile)
-	defer os.Remove(keyFile)
+	t.Parallel()
+	_, _, serverCert, priv := generateSelfSignedCert(t)
 
 	// Create a simple handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Create a listener
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	server := &http.Server{
-		Addr:    ln.Addr().String(),
-		Handler: handler,
-	}
-
-	go func() {
-		err := server.ListenAndServeTLS(certFile, keyFile)
-		if err != http.ErrServerClosed {
-			t.Logf("server error: %v", err)
-		}
-	}()
-	defer server.Close()
-
-	// Wait for the server to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Create a client that trusts our self-signed cert
-	caCert, err := os.ReadFile(certFile)
-	require.NoError(t, err)
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caCertPool,
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{serverCert.Raw},
+				PrivateKey:  priv,
+				Leaf:        serverCert,
 			},
 		},
 	}
+	server.StartTLS()
+	defer server.Close()
+
+	// Create a client that trusts our self-signed cert
+	client := server.Client()
 
 	// Make a request
-	resp, err := client.Get("https://" + server.Addr)
+	resp, err := client.Get(server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -107,86 +90,56 @@ func TestTLSIntegration(t *testing.T) {
 }
 
 func TestMTLSIntegration(t *testing.T) {
+	t.Parallel()
 	// Server cert
-	serverCertFile, serverKeyFile := generateSelfSignedCert(t)
-	defer os.Remove(serverCertFile)
-	defer os.Remove(serverKeyFile)
+	_, _, serverCert, serverPriv := generateSelfSignedCert(t)
 
 	// Client cert
-	clientCertFile, clientKeyFile := generateSelfSignedCert(t)
-	defer os.Remove(clientCertFile)
-	defer os.Remove(clientKeyFile)
+	_, _, clientCert, clientPriv := generateSelfSignedCert(t)
 
 	// Server setup
-	caCert, err := os.ReadFile(clientCertFile)
-	require.NoError(t, err)
 	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	tlsConfig := &tls.Config{
-		ClientCAs:  caCertPool,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-	}
+	caCertPool.AddCert(clientCert)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	server := &http.Server{
-		Addr:      ln.Addr().String(),
-		Handler:   handler,
-		TLSConfig: tlsConfig,
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{serverCert.Raw},
+				PrivateKey:  serverPriv,
+				Leaf:        serverCert,
+			},
+		},
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  caCertPool,
 	}
-
-	go func() {
-		err := server.ListenAndServeTLS(serverCertFile, serverKeyFile)
-		if err != http.ErrServerClosed {
-			t.Logf("server error: %v", err)
-		}
-	}()
+	server.StartTLS()
 	defer server.Close()
 
-	// Wait for the server to start
-	time.Sleep(100 * time.Millisecond)
-
 	// Client with certificate
-	cert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
-	require.NoError(t, err)
-
-	serverCaCert, err := os.ReadFile(serverCertFile)
-	require.NoError(t, err)
-	serverCaCertPool := x509.NewCertPool()
-	serverCaCertPool.AppendCertsFromPEM(serverCaCert)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:      serverCaCertPool,
-				Certificates: []tls.Certificate{cert},
-			},
+	client := server.Client()
+	client.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{
+		{
+			Certificate: [][]byte{clientCert.Raw},
+			PrivateKey:  clientPriv,
+			Leaf:        clientCert,
 		},
 	}
 
 	// Make a request with the client cert
-	resp, err := client.Get("https://" + server.Addr)
+	resp, err := client.Get(server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
-
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Client without certificate
-	badClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: serverCaCertPool,
-			},
-		},
-	}
+	badClient := server.Client()
 
 	// Make a request without the client cert
-	_, err = badClient.Get("https://" + server.Addr)
+	_, err = badClient.Get(server.URL)
 	assert.Error(t, err)
 }

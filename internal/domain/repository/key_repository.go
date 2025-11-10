@@ -6,6 +6,7 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 )
 
+//go:generate mockery --name KeyRepository --output mocks --outpkg mocks
 // KeyRepository defines the interface for key persistence.
 type KeyRepository interface {
 	CreateKey(ctx context.Context, key *models.Key) error

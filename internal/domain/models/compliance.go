@@ -19,6 +19,7 @@ type KLREvent struct {
 
 // PolicyRequest represents a request to the policy engine.
 type PolicyRequest struct {
-	ComplianceClass string `json:"compliance_class"`
-	KeySize         int    `json:"key_size"`
+	ComplianceClass    string             `json:"compliance_class"`
+	KeySize            int                `json:"key_size"`
+	CurrentRiskProfile *TenantRiskProfile `json:"current_risk_profile,omitempty"`
 }

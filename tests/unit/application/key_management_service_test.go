@@ -194,13 +194,14 @@ func TestKeyManagementService_CompromiseKey_CallsKLR(t *testing.T) {
 	mockCDNManager.AssertExpectations(t)
 }
 
-func TestKeyManagementService_RotateTenantKey_ChecksPolicy(t *testing.T) {
+func TestKeyManagementService_RotateTenantKey_ChecksPolicyAndRisk(t *testing.T) {
 	mockKeyRepo := new(MockKeyRepository)
 	mockCDNManager := new(MockCDNCacheManager)
 	mockKeyProvider := new(MockKeyProvider)
 	mockPolicyEngine := new(mocks.PolicyEngine)
 	mockKLR := new(mocks.KeyLifecycleRegistry)
 	mockTenantRepo := new(MockTenantRepository)
+	mockRiskOracle := new(mocks.RiskOracle)
 	log := logger.NewNoopLogger()
 
 	keyProviders := map[string]service.KeyProvider{
@@ -214,15 +215,25 @@ func TestKeyManagementService_RotateTenantKey_ChecksPolicy(t *testing.T) {
 		mockPolicyEngine,
 		mockKLR,
 		log,
+		mockRiskOracle,
 	)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
 	tenantID := "test-tenant"
+	riskProfile := &models.TenantRiskProfile{
+		AnomalyScore: 0.1,
+	}
 
 	// Set up mock expectations
 	mockTenantRepo.On("FindByID", ctx, tenantID).Return(&models.Tenant{TenantID: tenantID, ComplianceClass: "L1"}, nil)
-	mockPolicyEngine.On("CheckKeyGeneration", ctx, mock.AnythingOfType("models.PolicyRequest")).Return(nil)
+	mockRiskOracle.On("GetTenantRisk", ctx, tenantID).Return(riskProfile, nil)
+	// Expect the policy request to contain the risk profile
+	expectedPolicyRequest := mock.MatchedBy(func(req models.PolicyRequest) bool {
+		return req.ComplianceClass == "L1" && req.CurrentRiskProfile == riskProfile
+	})
+	mockPolicyEngine.On("CheckKeyGeneration", ctx, expectedPolicyRequest).Return(nil)
+
 	mockKeyRepo.On("CreateKey", ctx, mock.AnythingOfType("*models.Key")).Return(nil)
 	mockKLR.On("LogEvent", ctx, mock.AnythingOfType("models.KLREvent")).Return(nil)
 	mockKeyRepo.On("GetActiveKeys", ctx, tenantID).Return([]*models.Key{}, nil)
@@ -235,6 +246,7 @@ func TestKeyManagementService_RotateTenantKey_ChecksPolicy(t *testing.T) {
 	// Assert the results
 	assert.NoError(t, err)
 	mockTenantRepo.AssertExpectations(t)
+	mockRiskOracle.AssertExpectations(t)
 	mockPolicyEngine.AssertExpectations(t)
 	mockKeyRepo.AssertExpectations(t)
 	mockKLR.AssertExpectations(t)

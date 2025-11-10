@@ -196,3 +196,35 @@ func (r *Router) Stop(ctx context.Context) error {
 func (r *Router) Engine() *gin.Engine {
 	return r.engine
 }
+
+// InternalRouter is a simplified router for internal APIs.
+type InternalRouter struct {
+	engine          *gin.Engine
+	mlInternalHandler *handlers.MLInternalHandler
+}
+
+// NewInternalRouter creates a new InternalRouter.
+func NewInternalRouter(mlInternalHandler *handlers.MLInternalHandler) *InternalRouter {
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	return &InternalRouter{
+		engine:          engine,
+		mlInternalHandler: mlInternalHandler,
+	}
+}
+
+// SetupRoutes sets up the routes for the internal API.
+func (r *InternalRouter) SetupRoutes() {
+	internal := r.engine.Group("/_internal")
+	{
+		ml := internal.Group("/ml")
+		{
+			ml.POST("/risk", r.mlInternalHandler.UpdateTenantRisk)
+		}
+	}
+}
+
+// Engine returns the Gin engine.
+func (r *InternalRouter) Engine() *gin.Engine {
+	return r.engine
+}

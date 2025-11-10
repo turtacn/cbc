@@ -98,9 +98,11 @@ type Application struct {
 	deviceAuthAppService service.DeviceAuthAppService
 	tenantAppService service.TenantAppService
 	httpServer *http.Server
+	internalHTTPServer *http.Server
 	grpcServer *grpc.Server
 	ctx context.Context
 	cancel context.CancelFunc
+	riskRepo repository.RiskRepository
 }
 
 func main() {
@@ -250,7 +252,8 @@ func (app *Application) initDomainServices() error {
 		return fmt.Errorf("failed to create policy engine: %w", err)
 	}
 
-	app.kms, err = application.NewKeyManagementService(keyProviders, app.keyRepo, app.tenantRepo, policyEngine, klr, app.logger)
+	riskOracle := application.NewRiskOracle(app.riskRepo)
+	app.kms, err = application.NewKeyManagementService(keyProviders, app.keyRepo, app.tenantRepo, policyEngine, klr, app.logger, riskOracle)
 	if err != nil {
 		return fmt.Errorf("failed to create key management service: %w", err)
 	}
@@ -273,6 +276,7 @@ func (app *Application) initDomainServices() error {
 	app.blacklistStore = redisStore.NewTokenBlacklistStore(redisClient)
 	app.policyService = policy.NewStubPolicyService()
 	app.mgrKeyFetcher = kms.NewMgrKeyFetcher(app.vaultClient, redisClient)
+
 	app.logger.Info(app.ctx, "Domain services initialized via adapters")
 	return nil
 }
@@ -294,6 +298,7 @@ func (app *Application) initRepositories() error {
 	app.deviceRepo = postgres.NewDeviceRepository(db, app.logger)
 	app.tenantRepo = postgres.NewTenantRepository(db, app.logger)
 	app.keyRepo = postgres.NewKeyRepository(db)
+	app.riskRepo = infraPostgres.NewPostgresRiskRepository(db)
 	app.logger.Info(app.ctx, "Repositories initialized")
 	return nil
 }
@@ -343,6 +348,15 @@ func (app *Application) initInterfaces() error {
 	router.SetupRoutes()
 	app.httpServer = &http.Server{Addr: httpPort, Handler: router.Engine(), TLSConfig: tlsConfig}
 	app.logger.Info(app.ctx, "HTTP interface initialized", logger.String("port", httpPort))
+
+	// Internal HTTP Server for ML Risk Updates
+	internalHTTPPort := fmt.Sprintf(":%d", app.config.Server.InternalHTTPPort)
+	riskUpdateService := application.NewRiskUpdateService(app.riskRepo)
+	mlInternalHandler := handlers.NewMLInternalHandler(riskUpdateService)
+	internalRouter := httpRouter.NewInternalRouter(mlInternalHandler)
+	internalRouter.SetupRoutes()
+	app.internalHTTPServer = &http.Server{Addr: internalHTTPPort, Handler: internalRouter.Engine()}
+	app.logger.Info(app.ctx, "Internal HTTP interface initialized", logger.String("port", internalHTTPPort))
 
 	// gRPC Server
 	grpcPort := fmt.Sprintf(":%d", app.config.Server.GRPCPort)
@@ -419,6 +433,13 @@ func (app *Application) Start() error {
 	}()
 
 	go func() {
+		app.logger.Info(app.ctx, "Starting internal HTTP server")
+		if err := app.internalHTTPServer.ListenAndServe(); err != http.ErrServerClosed {
+			app.logger.Fatal(app.ctx, "Internal HTTP server crashed", err)
+		}
+	}()
+
+	go func() {
 		mux := http.NewServeMux()
 		mux.Handle(app.config.Observability.MetricsEndpoint, promhttp.Handler())
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", app.config.Observability.PrometheusPort), mux); err != http.ErrServerClosed {
@@ -443,6 +464,9 @@ func (app *Application) Shutdown() error {
 
 	if err := app.httpServer.Shutdown(shutdownCtx); err != nil {
 		app.logger.Error(shutdownCtx, "HTTP server shutdown error", err)
+	}
+	if err := app.internalHTTPServer.Shutdown(shutdownCtx); err != nil {
+		app.logger.Error(shutdownCtx, "Internal HTTP server shutdown error", err)
 	}
 	app.grpcServer.GracefulStop()
 
