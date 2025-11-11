@@ -1,15 +1,22 @@
+
 // internal/application/service/auth_app_service_test.go
 package service
 
 import (
 	"context"
+	"fmt"
+	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/domain/models"
 	"github.com/turtacn/cbc/internal/domain/repository"
 	domainservice "github.com/turtacn/cbc/internal/domain/service"
 	"github.com/turtacn/cbc/pkg/constants"
+	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
 // Mock implementations for dependencies
@@ -211,6 +218,14 @@ type MockTokenDomainService struct {
 	mock.Mock
 }
 
+func (m *MockTokenDomainService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
+	args := m.Called(ctx, tenantID, subject, scope)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Token), args.Error(1)
+}
+
 func (m *MockTokenDomainService) IssueTokenPair(ctx context.Context, tenantID, agentID, deviceFingerprint string, scope []string, metadata map[string]interface{}) (*models.Token, *models.Token, error) {
 	args := m.Called(ctx, tenantID, agentID, deviceFingerprint, scope, metadata)
 	if args.Get(0) == nil {
@@ -318,4 +333,134 @@ func (m *MockBlacklistStore) Revoke(ctx context.Context, tenantID, jti string, e
 func (m *MockBlacklistStore) IsRevoked(ctx context.Context, tenantID, jti string) (bool, error) {
 	args := m.Called(ctx, tenantID, jti)
 	return args.Bool(0), args.Error(1)
+}
+
+type MockAuditService struct {
+	mock.Mock
+}
+
+func (m *MockAuditService) LogEvent(ctx context.Context, event models.AuditEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
+	// Arrange
+	mockTokenService := new(MockTokenDomainService)
+	mockDeviceRepo := new(MockDeviceRepo)
+	mockTenantRepo := new(MockTenantRepo)
+	mockRateLimiter := new(MockRateLimiter)
+	mockBlacklist := new(MockBlacklistStore)
+	mockAuditService := new(MockAuditService)
+	log := logger.NewDefaultLogger()
+
+	authService := NewAuthAppService(
+		mockTokenService,
+		mockDeviceRepo,
+		mockTenantRepo,
+		mockRateLimiter,
+		mockBlacklist,
+		mockAuditService,
+		log,
+	)
+
+	ctx := context.Background()
+	req := &dto.RefreshTokenRequest{
+		RefreshToken: "valid-refresh-token",
+		TenantID:     "tenant-1",
+	}
+
+	oldRefreshToken := &models.Token{
+		JTI:       "old-jti",
+		TenantID:  "tenant-1",
+		DeviceID:  "device-1",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	newAccessToken := &models.Token{
+		JTI:       "new-access-token",
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}
+	newRefreshToken := &models.Token{
+		JTI: "new-refresh-token",
+	}
+
+	mockTokenService.On("VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID).Return(oldRefreshToken, nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(false, nil)
+	mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh").Return(true, 0, time.Time{}, nil)
+	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(&models.Device{Status: constants.DeviceStatusActive}, nil)
+	mockBlacklist.On("Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt).Return(nil)
+	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, []string(nil)).Return(newAccessToken, nil)
+	mockTokenService.On("IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil)).Return(newRefreshToken, nil)
+	mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil)
+	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
+
+	// Act
+	resp, err := authService.RefreshToken(ctx, req)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "new-access-token", resp.AccessToken)
+	assert.Equal(t, "new-refresh-token", resp.RefreshToken)
+
+	mockTokenService.AssertCalled(t, "VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID)
+	mockBlacklist.AssertCalled(t, "IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI)
+	mockRateLimiter.AssertCalled(t, "Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh")
+	mockDeviceRepo.AssertCalled(t, "FindByID", ctx, oldRefreshToken.DeviceID)
+	mockBlacklist.AssertCalled(t, "Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt)
+	mockTokenService.AssertCalled(t, "GenerateAccessToken", ctx, oldRefreshToken, []string(nil))
+	mockTokenService.AssertCalled(t, "IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil))
+	mockDeviceRepo.AssertCalled(t, "Update", ctx, mock.AnythingOfType("*models.Device"))
+	mockAuditService.AssertNumberOfCalls(t, "LogEvent", 2)
+}
+
+func Test_AuthAppService_RefreshToken_ReplayAttack(t *testing.T) {
+	// Arrange
+	mockTokenService := new(MockTokenDomainService)
+	mockDeviceRepo := new(MockDeviceRepo)
+	mockTenantRepo := new(MockTenantRepo)
+	mockRateLimiter := new(MockRateLimiter)
+	mockBlacklist := new(MockBlacklistStore)
+	mockAuditService := new(MockAuditService)
+	log := logger.NewDefaultLogger()
+
+	authService := NewAuthAppService(
+		mockTokenService,
+		mockDeviceRepo,
+		mockTenantRepo,
+		mockRateLimiter,
+		mockBlacklist,
+		mockAuditService,
+		log,
+	)
+
+	ctx := context.Background()
+	req := &dto.RefreshTokenRequest{
+		RefreshToken: "reused-refresh-token",
+		TenantID:     "tenant-1",
+	}
+
+	oldRefreshToken := &models.Token{
+		JTI:       "old-jti",
+		TenantID:  "tenant-1",
+		DeviceID:  "device-1",
+		TokenType: constants.TokenTypeRefresh,
+	}
+
+	mockTokenService.On("VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID).Return(oldRefreshToken, nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(true, nil)
+
+	// Act
+	resp, err := authService.RefreshToken(ctx, req)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, errors.ErrTokenRevoked(string(oldRefreshToken.TokenType), oldRefreshToken.JTI), err)
+
+	mockTokenService.AssertCalled(t, "VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID)
+	mockBlacklist.AssertCalled(t, "IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI)
+	mockBlacklist.AssertNotCalled(t, "Revoke")
+	mockTokenService.AssertNotCalled(t, "GenerateAccessToken")
+	mockTokenService.AssertNotCalled(t, "IssueToken")
 }

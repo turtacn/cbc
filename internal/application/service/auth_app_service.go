@@ -301,28 +301,54 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 		return nil, errors.ErrDeviceUntrusted(refreshToken.DeviceID, string(device.Status))
 	}
 
-	newRefreshToken, newAccessToken, err := s.tokenService.RefreshToken(ctx, req.RefreshToken, nil)
+	// 2. Revoke Old Token
+	err = s.blacklist.Revoke(ctx, refreshToken.TenantID, refreshToken.JTI, refreshToken.ExpiresAt)
 	if err != nil {
-		s.logger.Error(ctx, "Failed to refresh token", err, logger.String("agent_id", refreshToken.DeviceID))
-		return nil, err
+		s.logger.Error(ctx, "Failed to revoke old refresh token", err, logger.String("jti", refreshToken.JTI))
+		return nil, errors.ErrServerError("failed to revoke old refresh token").WithCause(err)
 	}
+
+	// 3. Generate New Tokens
+	newAccessToken, err := s.tokenService.GenerateAccessToken(ctx, refreshToken, nil)
+	if err != nil {
+		s.logger.Error(ctx, "Failed to generate new access token", err, logger.String("agent_id", refreshToken.DeviceID))
+		return nil, errors.ErrServerError("failed to generate new access token").WithCause(err)
+	}
+
+	newRefreshToken, err := s.tokenService.IssueToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, nil)
+	if err != nil {
+		s.logger.Error(ctx, "Failed to issue new refresh token", err, logger.String("agent_id", refreshToken.DeviceID))
+		return nil, errors.ErrServerError("failed to issue new refresh token").WithCause(err)
+	}
+
+	// 4. Save New Token Metadata
+	// The token is already saved by the IssueToken method, so we don't need to do anything here.
 
 	device.LastSeenAt = time.Now()
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
 		s.logger.Warn(ctx, "Failed to update device last seen time", logger.Error(err))
 	}
 
+	// 5. Audit
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "token.refresh",
 		TenantID:  refreshToken.TenantID,
 		Actor:     refreshToken.DeviceID,
 		Success:   true,
-		Details:   fmt.Sprintf("Old JTI: %s", refreshToken.JTI),
+		Details:   fmt.Sprintf("New JTI: %s", newRefreshToken.JTI),
+	})
+	s.auditService.LogEvent(ctx, models.AuditEvent{
+		EventType: "token.revoke",
+		TenantID:  refreshToken.TenantID,
+		Actor:     refreshToken.DeviceID,
+		Success:   true,
+		Details:   fmt.Sprintf("Old JTI: %s, Reason: rotation", refreshToken.JTI),
 	})
 	s.logger.Info(ctx, "Token refresh successful",
 		logger.String("tenant_id", refreshToken.TenantID),
 		logger.String("agent_id", refreshToken.DeviceID),
 		logger.String("old_jti", refreshToken.JTI),
+		logger.String("new_jti", newRefreshToken.JTI),
 	)
 
 	return &dto.TokenResponse{
