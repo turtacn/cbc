@@ -20,11 +20,11 @@ const (
 
 // redisDeviceAuthStore is a Redis-backed implementation of the DeviceAuthStore interface.
 type redisDeviceAuthStore struct {
-	client *redis.Client
+	client redis.UniversalClient
 }
 
 // NewRedisDeviceAuthStore creates a new instance of redisDeviceAuthStore.
-func NewRedisDeviceAuthStore(client *redis.Client) service.DeviceAuthStore {
+func NewRedisDeviceAuthStore(client redis.UniversalClient) service.DeviceAuthStore {
 	return &redisDeviceAuthStore{client: client}
 }
 

@@ -8,11 +8,22 @@ import (
 )
 
 //go:generate mockery --name RedisConnectionManager --output ../../../domain/service/mocks --outpkg mocks
-// RedisConnectionManager defines the interface for managing Redis connections.
-// This allows for mocking in tests.
+// RedisConnectionManager defines an interface for managing the lifecycle of a Redis connection.
+// This abstraction is crucial for decoupling application logic from the concrete connection implementation,
+// enabling easier testing and mocking.
+// RedisConnectionManager 定义了用于管理 Redis 连接生命周期的接口。
+// 这种抽象对于将应用程序逻辑与具体的连接实现解耦至关重要，从而使测试和模拟更加容易。
 type RedisConnectionManager interface {
+	// GetClient returns the underlying universal Redis client, which can represent a standalone, cluster, or sentinel connection.
+	// GetClient 返回底层的通用 Redis 客户端，它可以代表独立、集群或哨兵连接。
 	GetClient() redis.UniversalClient
+	// Close gracefully terminates the connection to Redis.
+	// Close 优雅地终止与 Redis 的连接。
 	Close() error
+	// Ping checks the connectivity to the Redis server.
+	// Ping 检查与 Redis 服务器的连接性。
 	Ping(ctx context.Context) error
+	// HealthCheck provides a detailed status of the Redis connection.
+	// HealthCheck 提供 Redis 连接的详细状态。
 	HealthCheck(ctx context.Context) (map[string]interface{}, error)
 }

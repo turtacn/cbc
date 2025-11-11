@@ -11,47 +11,48 @@ import (
 	"github.com/turtacn/cbc/pkg/utils"
 )
 
-// DeviceHandler 设备 HTTP 处理器
+// DeviceHandler handles HTTP requests related to device management.
+// It orchestrates calls to the device application service and formats responses.
+// DeviceHandler 处理与设备管理相关的 HTTP 请求。
+// 它协调对设备应用服务的调用并格式化响应。
 type DeviceHandler struct {
 	deviceService service.DeviceAppService
-	metrics       HTTPMetrics
 	logger        logger.Logger
 }
 
-// NewDeviceHandler 创建设备处理器
+// NewDeviceHandler creates a new instance of DeviceHandler.
+// NewDeviceHandler 创建一个新的 DeviceHandler 实例。
 func NewDeviceHandler(
 	deviceService service.DeviceAppService,
-	metrics HTTPMetrics,
 	log logger.Logger,
 ) *DeviceHandler {
 	return &DeviceHandler{
 		deviceService: deviceService,
-		metrics:       metrics,
 		logger:        log,
 	}
 }
 
-// RegisterDevice 注册设备
+// RegisterDevice handles the endpoint for registering a new device.
+// It validates the incoming request and calls the application service to perform the registration.
 // POST /api/v1/devices
+// RegisterDevice 处理用于注册新设备的端点。
+// 它验证传入的请求并调用应用程序服务以执行注册。
 func (h *DeviceHandler) RegisterDevice(c *gin.Context) {
-	h.metrics.RecordRequestStart(c.Request.Context(), "register_device")
 	var req dto.DeviceRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warn(c.Request.Context(), "Invalid register device request", logger.Error(err))
-		h.metrics.RecordRequestError(c.Request.Context(), "register_device", http.StatusBadRequest)
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse(err, ""))
 		return
 	}
 
-	// 验证请求参数
+	// Validate the request DTO.
 	if err := utils.ValidateStruct(&req); err != nil {
-		h.logger.Warn(c.Request.Context(), "Validation failed", logger.Error(err))
-		h.metrics.RecordRequestError(c.Request.Context(), "register_device", http.StatusBadRequest)
+		h.logger.Warn(c.Request.Context(), "Validation failed for register device request", logger.Error(err))
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse(err, ""))
 		return
 	}
 
-	// 调用应用服务
+	// Call the application service.
 	response, err := h.deviceService.RegisterDevice(c.Request.Context(), &req)
 	if err != nil {
 		h.handleDeviceError(c, err, "register_device")
@@ -66,12 +67,13 @@ func (h *DeviceHandler) RegisterDevice(c *gin.Context) {
 	c.JSON(http.StatusCreated, response)
 }
 
-// GetDevice 获取设备信息
+// GetDevice handles the endpoint for retrieving information about a specific device.
 // GET /api/v1/devices/:device_id
+// GetDevice 处理用于检索有关特定设备信息的端点。
 func (h *DeviceHandler) GetDevice(c *gin.Context) {
 	deviceID := c.Param("device_id")
 	if deviceID == "" {
-		h.handleDeviceError(c, errors.ErrInvalidRequest("device_id required"), "get_device")
+		h.handleDeviceError(c, errors.ErrInvalidRequest("device_id is required"), "get_device")
 		return
 	}
 	resp, err := h.deviceService.GetDeviceInfo(c.Request.Context(), deviceID)
@@ -82,8 +84,9 @@ func (h *DeviceHandler) GetDevice(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// UpdateDevice 更新设备信息
-// PUT /i/v1/devices/:device_id
+// UpdateDevice handles the endpoint for updating a device's information.
+// PUT /api/v1/devices/:device_id
+// UpdateDevice 处理用于更新设备信息的端点。
 func (h *DeviceHandler) UpdateDevice(c *gin.Context) {
 	deviceID := c.Param("device_id")
 	var req dto.DeviceUpdateRequest
@@ -103,7 +106,10 @@ func (h *DeviceHandler) UpdateDevice(c *gin.Context) {
 	c.AbortWithStatus(http.StatusNoContent)
 }
 
-// handleDeviceError 统一处理设备错误
+// handleDeviceError provides centralized error handling for device-related operations.
+// It logs the error and sends a standardized JSON error response.
+// handleDeviceError 为与设备相关的操作提供集中的错误处理。
+// 它记录错误并发送标准化的 JSON 错误响应。
 func (h *DeviceHandler) handleDeviceError(c *gin.Context, err error, operation string) {
 	cbcErr, ok := errors.AsCBCError(err)
 	if !ok {
@@ -112,7 +118,6 @@ func (h *DeviceHandler) handleDeviceError(c *gin.Context, err error, operation s
 		return
 	}
 
-	h.metrics.RecordRequestError(c.Request.Context(), operation, cbcErr.HTTPStatus())
 	h.logger.Warn(c.Request.Context(), "Device operation failed",
 		logger.String("operation", operation),
 		logger.String("error_code", string(cbcErr.Code())),

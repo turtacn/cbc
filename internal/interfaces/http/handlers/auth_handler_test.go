@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -81,34 +80,12 @@ func (m *MockAuthAppService) RegisterDevice(ctx context.Context, req *dto.Regist
 	return args.Get(0).(*dto.TokenResponse), args.Error(1)
 }
 
-// MockHTTPMetrics is a mock for HTTPMetrics
-type MockHTTPMetrics struct {
-	mock.Mock
-}
-
-func (m *MockHTTPMetrics) RecordRequestStart(ctx context.Context, handler string) {
-	m.Called(ctx, handler)
-}
-
-func (m *MockHTTPMetrics) RecordRequestError(ctx context.Context, handler string, httpStatus int) {
-	m.Called(ctx, handler, httpStatus)
-}
-
-func (m *MockHTTPMetrics) RecordRequestSuccess(ctx context.Context, handler string) {
-	m.Called(ctx, handler)
-}
-
-func (m *MockHTTPMetrics) RecordRequestDuration(ctx context.Context, handler string, status int, duration time.Duration) {
-	m.Called(ctx, handler, status, duration)
-}
-
 func TestAuthHandler_IssueToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mockAppService := new(MockAuthAppService)
-	mockMetrics := new(MockHTTPMetrics)
 	log := logger.NewDefaultLogger()
 
-	handler := NewAuthHandler(mockAppService, nil, mockMetrics, log)
+	handler := NewAuthHandler(mockAppService, nil, log)
 
 	router := gin.Default()
 	router.POST("/token", handler.IssueToken)
@@ -132,7 +109,6 @@ func TestAuthHandler_IssueToken(t *testing.T) {
 			AccessToken: "test-token",
 		}
 
-		mockMetrics.On("RecordRequestStart", mock.Anything, "issue_token").Return()
 		mockAppService.On("IssueToken", mock.Anything, mock.MatchedBy(func(r *dto.IssueTokenRequest) bool {
 			return r.TenantID == tenantID && r.AgentID == agentID
 		})).Return(mockResponse, nil).Once()
@@ -147,6 +123,5 @@ func TestAuthHandler_IssueToken(t *testing.T) {
 		assert.Equal(t, mockResponse.AccessToken, respBody.AccessToken)
 
 		mockAppService.AssertExpectations(t)
-		mockMetrics.AssertExpectations(t)
 	})
 }

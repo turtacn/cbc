@@ -13,14 +13,18 @@ import (
 	"strings"
 )
 
-// AuthGRPCService gRPC 认证服务实现
+// AuthGRPCService provides the gRPC implementation of the authentication service.
+// It acts as an adapter, translating gRPC requests to application service calls and mapping results back to gRPC responses.
+// AuthGRPCService 提供了认证服务的 gRPC 实现。
+// 它充当适配器，将 gRPC 请求转换为应用程序服务调用，并将结果映射回 gRPC 响应。
 type AuthGRPCService struct {
 	authpb.UnimplementedAuthServiceServer
 	authAppService service.AuthAppService
 	log            logger.Logger
 }
 
-// NewAuthGRPCService 创建 gRPC 认证服务
+// NewAuthGRPCService creates a new instance of the AuthGRPCService.
+// NewAuthGRPCService 创建一个新的 AuthGRPCService 实例。
 func NewAuthGRPCService(
 	authAppService service.AuthAppService,
 	log logger.Logger,
@@ -31,17 +35,20 @@ func NewAuthGRPCService(
 	}
 }
 
-// IssueToken 颁发令牌
+// IssueToken handles the gRPC request for issuing a new token.
+// It converts the protobuf request into a DTO, calls the application service, and formats the response.
+// IssueToken 处理颁发新令牌的 gRPC 请求。
+// 它将 protobuf 请求转换为 DTO, 调用应用程序服务, 并格式化响应。
 func (s *AuthGRPCService) IssueToken(
 	ctx context.Context,
 	req *authpb.IssueTokenRequest,
 ) (*authpb.TokenResponse, error) {
-	s.log.Info(ctx, "IssueToken request received",
+	s.log.Info(ctx, "IssueToken request received via gRPC",
 		logger.String("tenant_id", req.TenantId),
 		logger.String("grant_type", req.GrantType),
 	)
 
-	// 转换 gRPC 请求为 DTO
+	// Convert gRPC request to DTO
 	issueDTO := &dto.TokenIssueRequest{
 		TenantID:     req.TenantId,
 		GrantType:    req.GrantType,
@@ -52,16 +59,16 @@ func (s *AuthGRPCService) IssueToken(
 		ClientSecret: req.Credentials.ClientAssertion,
 	}
 
-	// 调用应用服务
+	// Call the application service
 	tokenResp, err := s.authAppService.IssueToken(ctx, issueDTO)
 	if err != nil {
-		s.log.Error(ctx, "IssueToken failed", err,
+		s.log.Error(ctx, "IssueToken failed in application service", err,
 			logger.String("tenant_id", req.TenantId),
 		)
 		return nil, mapDomainErrToGRPC(err)
 	}
 
-	// 转换为 gRPC 响应
+	// Convert DTO response to gRPC response
 	return &authpb.TokenResponse{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
@@ -72,9 +79,12 @@ func (s *AuthGRPCService) IssueToken(
 	}, nil
 }
 
-// RevokeToken revokes a token.
+// RevokeToken handles the gRPC request for revoking a token.
+// It converts the protobuf request into a DTO and calls the application service.
+// RevokeToken 处理撤销令牌的 gRPC 请求。
+// 它将 protobuf 请求转换为 DTO 并调用应用程序服务。
 func (s *AuthGRPCService) RevokeToken(ctx context.Context, req *authpb.RevokeTokenRequest) (*authpb.RevokeTokenResponse, error) {
-	s.log.Info(ctx, "RevokeToken request received")
+	s.log.Info(ctx, "RevokeToken request received via gRPC")
 
 	revokeDTO := &dto.RevokeTokenRequest{
 		Token:         req.Token,
@@ -84,7 +94,7 @@ func (s *AuthGRPCService) RevokeToken(ctx context.Context, req *authpb.RevokeTok
 
 	err := s.authAppService.RevokeToken(ctx, revokeDTO)
 	if err != nil {
-		s.log.Error(ctx, "RevokeToken failed", err)
+		s.log.Error(ctx, "RevokeToken failed in application service", err)
 		return nil, mapDomainErrToGRPC(err)
 	}
 
@@ -93,6 +103,10 @@ func (s *AuthGRPCService) RevokeToken(ctx context.Context, req *authpb.RevokeTok
 	}, nil
 }
 
+// mapDomainErrToGRPC translates domain-specific errors into standard gRPC status errors.
+// This ensures that clients receive meaningful, standardized error codes.
+// mapDomainErrToGRPC 将特定领域的错误转换为标准的 gRPC 状态错误。
+// 这确保客户端接收到有意义的、标准化的错误代码。
 func mapDomainErrToGRPC(err error) error {
 	if e, ok := err.(errors.CBCError); ok {
 		switch e.Code() {
@@ -109,8 +123,9 @@ func mapDomainErrToGRPC(err error) error {
 		case errors.ErrCodeRateLimitExceeded:
 			return status.Error(codes.ResourceExhausted, e.Description())
 		default:
-			return status.Error(codes.Internal, "An unexpected error occurred")
+			return status.Error(codes.Internal, "An unexpected internal error occurred")
 		}
 	}
+	// Fallback for non-domain errors
 	return status.Error(codes.Internal, "An unexpected error occurred")
 }

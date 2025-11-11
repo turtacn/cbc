@@ -14,7 +14,10 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// VaultClient provides a high-level interface for interacting with HashiCorp Vault.
+// VaultClient provides a high-level, opinionated interface for interacting with HashiCorp Vault.
+// It simplifies common operations like KV secret management, transit encryption, and token renewal.
+// VaultClient 提供与 HashiCorp Vault 交互的高级、自定义接口。
+// 它简化了常见的操作，如 KV 秘密管理、传输加密和令牌续订。
 type VaultClient struct {
 	client        *vault.Client
 	logger        logger.Logger
@@ -24,98 +27,127 @@ type VaultClient struct {
 	renewerCancel context.CancelFunc
 }
 
-// VaultConfig holds Vault client configuration.
+// VaultConfig holds all necessary configuration for the Vault client.
+// VaultConfig 保存 Vault 客户端的所有必要配置。
 type VaultConfig struct {
-	// Address is the Vault server address
+	// Address is the network address of the Vault server.
+	// Address 是 Vault 服务器的网络地址。
 	Address string
-	// Token is the authentication token
+	// Token is the authentication token used to communicate with Vault.
+	// Token 是用于与 Vault 通信的身份验证令牌。
 	Token string
-	// Namespace for multi-tenancy (Vault Enterprise)
+	// Namespace is the Vault Enterprise namespace to operate within.
+	// Namespace 是要操作的 Vault Enterprise 命名空间。
 	Namespace string
-	// MaxRetries for API requests
+	// MaxRetries is the maximum number of retries for failed API requests.
+	// MaxRetries 是 API 请求失败的最大重试次数。
 	MaxRetries int
-	// Timeout for API requests
+	// Timeout is the timeout for API requests to Vault.
+	// Timeout 是对 Vault 的 API 请求的超时时间。
 	Timeout time.Duration
-	// TokenRenewal enables automatic token renewal
+	// TokenRenewal enables automatic renewal of the Vault token.
+	// TokenRenewal 启用 Vault 令牌的自动续订。
 	TokenRenewal bool
-	// RenewalInterval for token renewal
+	// RenewalInterval specifies how often to check for token renewal.
+	// RenewalInterval 指定检查令牌续订的频率。
 	RenewalInterval time.Duration
-	// TLSConfig for secure connections
+	// TLSConfig contains settings for establishing a secure TLS connection to Vault.
+	// TLSConfig 包含用于建立到 Vault 的安全 TLS 连接的设置。
 	TLSConfig *TLSConfig
 }
 
-// TLSConfig holds TLS configuration for Vault connections.
+// TLSConfig holds TLS settings for the Vault client connection.
+// TLSConfig 保存 Vault 客户端连接的 TLS 设置。
 type TLSConfig struct {
-	// CACert path to CA certificate
+	// CACert is the path to the CA certificate file for verifying the Vault server's certificate.
+	// CACert 是用于验证 Vault 服务器证书的 CA 证书文件的路径。
 	CACert string
-	// ClientCert path to client certificate
+	// ClientCert is the path to the client's TLS certificate file.
+	// ClientCert 是客户端 TLS 证书文件的路径。
 	ClientCert string
-	// ClientKey path to client key
+	// ClientKey is the path to the client's TLS private key file.
+	// ClientKey 是客户端 TLS 私钥文件的路径。
 	ClientKey string
-	// Insecure skips TLS verification (not recommended for production)
+	// Insecure disables TLS certificate verification. Should not be used in production.
+	// Insecure 禁用 TLS 证书验证。不应在生产环境中使用。
 	Insecure bool
 }
 
-// SecretData represents secret key-value pairs.
+// SecretData represents a map of key-value pairs for a secret.
+// SecretData 表示一个秘密的键值对映射。
 type SecretData map[string]interface{}
 
-// EncryptionRequest represents a request to encrypt data.
+// EncryptionRequest represents a request to encrypt data using Vault's transit secrets engine.
+// EncryptionRequest 表示使用 Vault 的 transit 秘密引擎加密数据的请求。
 type EncryptionRequest struct {
-	// Plaintext data to encrypt (will be base64 encoded)
+	// Plaintext is the raw data to be encrypted.
+	// Plaintext 是要加密的原始数据。
 	Plaintext []byte
-	// Context for key derivation (optional)
+	// Context is optional, context-specific data for key derivation (AAD).
+	// Context 是用于密钥派生的可选的、特定于上下文的数据 (AAD)。
 	Context []byte
-	// KeyVersion to use for encryption (optional, uses latest by default)
+	// KeyVersion specifies a particular version of the key to use for encryption. 0 means the latest.
+	// KeyVersion 指定用于加密的密钥的特定版本。0 表示最新版本。
 	KeyVersion int
 }
 
-// EncryptionResponse represents the result of an encryption operation.
+// EncryptionResponse contains the result of an encryption operation.
+// EncryptionResponse 包含加密操作的结果。
 type EncryptionResponse struct {
-	// Ciphertext is the encrypted data
+	// Ciphertext is the base64-encoded encrypted data.
+	// Ciphertext 是 base64 编码的加密数据。
 	Ciphertext string
-	// KeyVersion used for encryption
+	// KeyVersion is the version of the key that was used for encryption.
+	// KeyVersion 是用于加密的密钥的版本。
 	KeyVersion int
 }
 
 // DecryptionRequest represents a request to decrypt data.
+// DecryptionRequest 表示解密数据的请求。
 type DecryptionRequest struct {
-	// Ciphertext to decrypt
+	// Ciphertext is the encrypted data to be decrypted.
+	// Ciphertext 是要解密的加密数据。
 	Ciphertext string
-	// Context for key derivation (must match encryption context)
+	// Context must match the context used during encryption, if any.
+	// Context 必须与加密期间使用的上下文匹配（如果有）。
 	Context []byte
 }
 
-// DecryptionResponse represents the result of a decryption operation.
+// DecryptionResponse contains the result of a decryption operation.
+// DecryptionResponse 包含解密操作的结果。
 type DecryptionResponse struct {
-	// Plaintext is the decrypted data
+	// Plaintext is the decrypted raw data.
+	// Plaintext 是解密的原始数据。
 	Plaintext []byte
-	// KeyVersion used for decryption
+	// KeyVersion is the version of the key that was used for decryption.
+	// KeyVersion 是用于解密的密钥的版本。
 	KeyVersion int
 }
 
-// DynamicCredentials represents dynamically generated credentials.
+// DynamicCredentials represents credentials that are generated on-demand and have a limited lifetime.
+// DynamicCredentials 表示按需生成且生命周期有限的凭据。
 type DynamicCredentials struct {
-	// Username for the credential
+	// Username is the generated username.
+	// Username 是生成的用户名。
 	Username string
-	// Password for the credential
+	// Password is the generated password.
+	// Password 是生成的密码。
 	Password string
-	// LeaseDuration is how long the credential is valid
+	// LeaseDuration is the duration for which the credentials are valid.
+	// LeaseDuration 是凭据有效的持续时间。
 	LeaseDuration time.Duration
-	// LeaseID for renewal/revocation
+	// LeaseID is the ID used to renew or revoke the credentials.
+	// LeaseID 是用于续订或撤销凭据的 ID。
 	LeaseID string
-	// Renewable indicates if the lease can be renewed
+	// Renewable indicates whether the lease for these credentials can be renewed.
+	// Renewable 指示这些凭据的租约是否可以续订。
 	Renewable bool
 }
 
-// NewVaultClient creates a new Vault client instance.
-//
-// Parameters:
-//   - config: Vault configuration
-//   - log: Logger instance
-//
-// Returns:
-//   - *VaultClient: Initialized Vault client
-//   - error: Initialization error if any
+// NewVaultClient creates and configures a new VaultClient instance.
+// It initializes the underlying Vault API client, configures TLS, and optionally starts a background process for token renewal.
+// NewVaultClient 创建并配置一个新的 VaultClient 实例。
+// 它会初始化底层的 Vault API 客户端，配置 TLS，并可选择性地启动一个后台进程来续订令牌。
 func NewVaultClient(config *VaultConfig, log logger.Logger) (*VaultClient, error) {
 	if config == nil {
 		return nil, fmt.Errorf("vault config is required")
@@ -181,7 +213,10 @@ func NewVaultClient(config *VaultConfig, log logger.Logger) (*VaultClient, error
 	return vc, nil
 }
 
-// startTokenRenewal starts automatic token renewal.
+// startTokenRenewal is an internal helper that starts the background token renewal process.
+// It checks if the token is renewable and sets up a goroutine to manage the renewal lifecycle.
+// startTokenRenewal 是一个内部辅助函数，用于启动后台令牌续订过程。
+// 它会检查令牌是否可续订，并设置一个 goroutine 来管理续订生命周期。
 func (vc *VaultClient) startTokenRenewal(ctx context.Context) error {
 	vc.renewerMutex.Lock()
 	defer vc.renewerMutex.Unlock()
@@ -217,7 +252,10 @@ func (vc *VaultClient) startTokenRenewal(ctx context.Context) error {
 	return nil
 }
 
-// renewalLoop handles token renewal events.
+// renewalLoop is the core logic for the background token renewal goroutine.
+// It listens on channels for renewal events, completion, or cancellation.
+// renewalLoop 是后台令牌续订 goroutine 的核心逻辑。
+// 它侦听通道以获取续订事件、完成或取消。
 func (vc *VaultClient) renewalLoop(ctx context.Context, renewer *vault.Renewer) {
 	go renewer.Renew()
 	defer renewer.Stop()
@@ -243,7 +281,8 @@ func (vc *VaultClient) renewalLoop(ctx context.Context, renewer *vault.Renewer) 
 	}
 }
 
-// StopTokenRenewal stops automatic token renewal.
+// StopTokenRenewal gracefully stops the automatic token renewal process.
+// StopTokenRenewal 优雅地停止自动令牌续订过程。
 func (vc *VaultClient) StopTokenRenewal() {
 	vc.renewerMutex.Lock()
 	defer vc.renewerMutex.Unlock()
@@ -261,15 +300,10 @@ func (vc *VaultClient) StopTokenRenewal() {
 	vc.logger.Info(context.Background(), "Token renewal stopped")
 }
 
-// WriteSecret writes a secret to Vault KV store.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - path: Secret path (e.g., "secret/data/myapp/config")
-//   - data: Secret data to store
-//
-// Returns:
-//   - error: Write operation error if any
+// WriteSecret creates or updates a secret in Vault's KVv2 secrets engine.
+// The provided data will be stored at the specified path.
+// WriteSecret 在 Vault 的 KVv2 秘密引擎中创建或更新一个秘密。
+// 提供的数据将存储在指定的路径下。
 func (vc *VaultClient) WriteSecret(ctx context.Context, path string, data SecretData) error {
 	// For KV v2, wrap data in "data" field
 	wrappedData := map[string]interface{}{
@@ -288,15 +322,10 @@ func (vc *VaultClient) WriteSecret(ctx context.Context, path string, data Secret
 	return nil
 }
 
-// ReadSecret reads a secret from Vault KV store.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - path: Secret path
-//
-// Returns:
-//   - SecretData: Secret data
-//   - error: Read operation error if any
+// ReadSecret retrieves a secret from Vault's KVv2 secrets engine.
+// It returns the secret data as a map or an error if not found.
+// ReadSecret 从 Vault 的 KVv2 秘密引擎中检索秘密。
+// 它以 map 的形式返回秘密数据，如果未找到则返回错误。
 func (vc *VaultClient) ReadSecret(ctx context.Context, path string) (SecretData, error) {
 	secret, err := vc.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
@@ -323,14 +352,10 @@ func (vc *VaultClient) ReadSecret(ctx context.Context, path string) (SecretData,
 	return secret.Data, nil
 }
 
-// DeleteSecret deletes a secret from Vault KV store.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - path: Secret path
-//
-// Returns:
-//   - error: Delete operation error if any
+// DeleteSecret removes a secret from the Vault KV store.
+// For KVv2, this permanently deletes the current version of the secret.
+// DeleteSecret 从 Vault KV 存储中删除一个秘密。
+// 对于 KVv2，这将永久删除秘密的当前版本。
 func (vc *VaultClient) DeleteSecret(ctx context.Context, path string) error {
 	_, err := vc.client.Logical().DeleteWithContext(ctx, path)
 	if err != nil {
@@ -344,15 +369,10 @@ func (vc *VaultClient) DeleteSecret(ctx context.Context, path string) error {
 	return nil
 }
 
-// ListSecrets lists secrets at a given path.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - path: Path to list
-//
-// Returns:
-//   - []string: List of secret keys
-//   - error: List operation error if any
+// ListSecrets enumerates secret keys at a given path in the KV store.
+// Note: This operation requires 'list' capabilities on the Vault path.
+// ListSecrets 枚举 KV 存储中给定路径下的秘密密钥。
+// 注意：此操作需要对 Vault 路径具有 'list' 权限。
 func (vc *VaultClient) ListSecrets(ctx context.Context, path string) ([]string, error) {
 	secret, err := vc.client.Logical().ListWithContext(ctx, path)
 	if err != nil {
@@ -381,16 +401,8 @@ func (vc *VaultClient) ListSecrets(ctx context.Context, path string) ([]string, 
 	return []string{}, nil
 }
 
-// Encrypt encrypts data using Vault's transit engine.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - keyName: Name of the encryption key
-//   - req: Encryption request
-//
-// Returns:
-//   - *EncryptionResponse: Encryption response
-//   - error: Encryption error if any
+// Encrypt performs encryption of plaintext data using a named key in Vault's transit secrets engine.
+// Encrypt 使用 Vault 的 transit 秘密引擎中的命名密钥对明文数据进行加密。
 func (vc *VaultClient) Encrypt(ctx context.Context, keyName string, req *EncryptionRequest) (*EncryptionResponse, error) {
 	path := fmt.Sprintf("transit/encrypt/%s", keyName)
 
@@ -437,16 +449,8 @@ func (vc *VaultClient) Encrypt(ctx context.Context, keyName string, req *Encrypt
 	return response, nil
 }
 
-// Decrypt decrypts data using Vault's transit engine.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - keyName: Name of the encryption key
-//   - req: Decryption request
-//
-// Returns:
-//   - *DecryptionResponse: Decryption response
-//   - error: Decryption error if any
+// Decrypt performs decryption of ciphertext using a named key in Vault's transit secrets engine.
+// Decrypt 使用 Vault 的 transit 秘密引擎中的命名密钥对密文进行解密。
 func (vc *VaultClient) Decrypt(ctx context.Context, keyName string, req *DecryptionRequest) (*DecryptionResponse, error) {
 	path := fmt.Sprintf("transit/decrypt/%s", keyName)
 
@@ -494,17 +498,10 @@ func (vc *VaultClient) Decrypt(ctx context.Context, keyName string, req *Decrypt
 	return response, nil
 }
 
-// GenerateDataKey generates a new data encryption key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - keyName: Name of the encryption key
-//   - bits: Key size in bits (128, 256, or 512)
-//
-// Returns:
-//   - []byte: Plaintext key
-//   - string: Encrypted key (ciphertext)
-//   - error: Generation error if any
+// GenerateDataKey creates a new data encryption key (DEK) using the transit engine.
+// It returns both the plaintext version of the key and its ciphertext (encrypted by the master key).
+// GenerateDataKey 使用 transit 引擎创建一个新的数据加密密钥 (DEK)。
+// 它返回密钥的明文版本及其密文（由主密钥加密）。
 func (vc *VaultClient) GenerateDataKey(ctx context.Context, keyName string, bits int) ([]byte, string, error) {
 	path := fmt.Sprintf("transit/datakey/plaintext/%s", keyName)
 
@@ -544,15 +541,8 @@ func (vc *VaultClient) GenerateDataKey(ctx context.Context, keyName string, bits
 	return plaintext, ciphertext, nil
 }
 
-// GetDynamicDBCredentials generates dynamic database credentials.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - role: Database role name
-//
-// Returns:
-//   - *DynamicCredentials: Generated credentials
-//   - error: Generation error if any
+// GetDynamicDBCredentials generates dynamic, short-lived database credentials from a configured role.
+// GetDynamicDBCredentials 从已配置的角色生成动态的、短暂的数据库凭据。
 func (vc *VaultClient) GetDynamicDBCredentials(ctx context.Context, role string) (*DynamicCredentials, error) {
 	path := fmt.Sprintf("database/creds/%s", role)
 
@@ -588,16 +578,10 @@ func (vc *VaultClient) GetDynamicDBCredentials(ctx context.Context, role string)
 	return creds, nil
 }
 
-// RenewLease renews a lease.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - leaseID: Lease ID to renew
-//   - increment: Increment duration (0 for default)
-//
-// Returns:
-//   - time.Duration: New lease duration
-//   - error: Renewal error if any
+// RenewLease extends the validity of a secret's lease.
+// This is used for dynamic credentials and other leased secrets.
+// RenewLease 延长秘密租约的有效期。
+// 这用于动态凭据和其他租用秘密。
 func (vc *VaultClient) RenewLease(ctx context.Context, leaseID string, increment time.Duration) (time.Duration, error) {
 	incrementSeconds := int(increment.Seconds())
 
@@ -619,14 +603,10 @@ func (vc *VaultClient) RenewLease(ctx context.Context, leaseID string, increment
 	return duration, nil
 }
 
-// RevokeLease revokes a lease.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - leaseID: Lease ID to revoke
-//
-// Returns:
-//   - error: Revocation error if any
+// RevokeLease immediately invalidates a secret's lease.
+// After revocation, the secret can no longer be used.
+// RevokeLease 立即作废一个秘密的租约。
+// 撤销后，该秘密将无法再使用。
 func (vc *VaultClient) RevokeLease(ctx context.Context, leaseID string) error {
 	err := vc.client.Sys().RevokeWithContext(ctx, leaseID)
 	if err != nil {
@@ -640,14 +620,10 @@ func (vc *VaultClient) RevokeLease(ctx context.Context, leaseID string) error {
 	return nil
 }
 
-// Health checks Vault server health.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//
-// Returns:
-//   - bool: True if healthy
-//   - error: Health check error if any
+// Health checks the status of the Vault server.
+// It returns true if the server is initialized and unsealed.
+// Health 检查 Vault 服务器的状态。
+// 如果服务器已初始化且未封印，则返回 true。
 func (vc *VaultClient) Health(ctx context.Context) (bool, error) {
 	health, err := vc.client.Sys().HealthWithContext(ctx)
 	if err != nil {
@@ -666,7 +642,10 @@ func (vc *VaultClient) Health(ctx context.Context) (bool, error) {
 	return isHealthy, nil
 }
 
-// Close closes the Vault client and stops token renewal.
+// Close gracefully shuts down the Vault client, stopping any background processes like token renewal.
+// It should be called when the application is shutting down.
+// Close 优雅地关闭 Vault 客户端，停止任何后台进程，如令牌续订。
+// 应在应用程序关闭时调用此方法。
 func (vc *VaultClient) Close() error {
 	vc.StopTokenRenewal()
 	vc.logger.Info(context.Background(), "Vault client closed")

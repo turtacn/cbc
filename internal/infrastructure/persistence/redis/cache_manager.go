@@ -13,27 +13,36 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// CacheManager provides high-level caching operations with Redis backend.
+// CacheManager provides a high-level abstraction for caching operations backed by Redis.
+// It handles key namespacing, serialization/deserialization, and common caching patterns.
+// CacheManager 提供了由 Redis 支持的缓存操作的高级抽象。
+// 它处理密钥命名空间、序列化/反序列化和常见的缓存模式。
 type CacheManager struct {
-	client    redis.UniversalClient
-	logger    logger.Logger
-	namespace string
+	client     redis.UniversalClient
+	logger     logger.Logger
+	namespace  string
 	defaultTTL time.Duration
 }
 
-// CacheOptions defines options for cache operations.
+// CacheOptions defines configurable options for individual cache operations.
+// CacheOptions 定义了单个缓存操作的可配置选项。
 type CacheOptions struct {
-	// TTL specifies time-to-live for the cache entry
+	// TTL specifies a custom time-to-live for a specific cache entry, overriding the default.
+	// TTL 为特定缓存条目指定自定义的生存时间，覆盖默认值。
 	TTL time.Duration
-	// Namespace overrides the default namespace for this operation
+	// Namespace allows overriding the default namespace for a specific operation.
+	// Namespace 允许为特定操作覆盖默认的命名空间。
 	Namespace string
-	// NX sets the key only if it does not exist
+	// NX (Not Exists) sets the key only if it does not already exist.
+	// NX (Not Exists) 仅在密钥不存在时才设置该密钥。
 	NX bool
-	// XX sets the key only if it already exists
+	// XX (Exists) sets the key only if it already exists.
+	// XX (Exists) 仅在密钥已存在时才设置该密钥。
 	XX bool
 }
 
-// CacheStats holds cache operation statistics.
+// CacheStats holds various statistics about cache performance and usage.
+// CacheStats 保存有关缓存性能和使用情况的各种统计信息。
 type CacheStats struct {
 	Hits        int64         `json:"hits"`
 	Misses      int64         `json:"misses"`
@@ -46,16 +55,17 @@ type CacheStats struct {
 	AvgLatency  time.Duration `json:"avg_latency"`
 }
 
-// NewCacheManager creates a new cache manager instance.
+// NewCacheManager creates and initializes a new CacheManager instance.
+// NewCacheManager 创建并初始化一个新的 CacheManager 实例。
 //
 // Parameters:
-//   - client: Redis client instance
-//   - namespace: Default namespace for cache keys
-//   - defaultTTL: Default time-to-live for cache entries
-//   - log: Logger instance
+//   - client: An underlying Redis client (UniversalClient for cluster/sentinel/single-node support).
+//   - namespace: A default prefix for all cache keys to avoid collisions.
+//   - defaultTTL: The default expiration time for cache entries if not otherwise specified.
+//   - log: A logger instance for logging cache operations and errors.
 //
 // Returns:
-//   - *CacheManager: Initialized cache manager
+//   - *CacheManager: A pointer to the newly created CacheManager.
 func NewCacheManager(
 	client redis.UniversalClient,
 	namespace string,
@@ -70,7 +80,10 @@ func NewCacheManager(
 	}
 }
 
-// buildKey constructs a namespaced cache key.
+// buildKey constructs a final cache key by prepending the configured namespace.
+// It allows for a namespace override via CacheOptions.
+// buildKey 通过在前面添加配置的命名空间来构造最终的缓存密钥。
+// 它允许通过 CacheOptions 覆盖命名空间。
 func (cm *CacheManager) buildKey(key string, opts *CacheOptions) string {
 	namespace := cm.namespace
 	if opts != nil && opts.Namespace != "" {
@@ -79,7 +92,9 @@ func (cm *CacheManager) buildKey(key string, opts *CacheOptions) string {
 	return fmt.Sprintf("%s:%s", namespace, key)
 }
 
-// getTTL returns the TTL to use for a cache operation.
+// getTTL determines the appropriate TTL for a cache operation,
+// prioritizing the TTL from CacheOptions and falling back to the default.
+// getTTL 确定缓存操作的适当 TTL，优先使用 CacheOptions 中的 TTL，然后回退到默认值。
 func (cm *CacheManager) getTTL(opts *CacheOptions) time.Duration {
 	if opts != nil && opts.TTL > 0 {
 		return opts.TTL
@@ -87,16 +102,10 @@ func (cm *CacheManager) getTTL(opts *CacheOptions) time.Duration {
 	return cm.defaultTTL
 }
 
-// Set stores a value in cache with optional TTL.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - value: Value to cache (will be JSON serialized)
-//   - opts: Cache options (TTL, namespace, etc.)
-//
-// Returns:
-//   - error: Set operation error if any
+// Set stores a value in the cache. The value is JSON serialized before storing.
+// It supports conditional operations like Set-if-not-exists (NX) or Set-if-exists (XX).
+// Set 将一个值存储在缓存中。该值在存储前会被 JSON 序列化。
+// 它支持条件操作，如 Set-if-not-exists (NX) 或 Set-if-exists (XX)。
 func (cm *CacheManager) Set(ctx context.Context, key string, value interface{}, opts *CacheOptions) error {
 	fullKey := cm.buildKey(key, opts)
 	ttl := cm.getTTL(opts)
@@ -139,17 +148,12 @@ func (cm *CacheManager) Set(ctx context.Context, key string, value interface{}, 
 	return nil
 }
 
-// Get retrieves a value from cache and deserializes it.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - dest: Pointer to destination variable for deserialization
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - bool: True if key exists
-//   - error: Get operation error if any
+// Get retrieves a value from the cache and deserializes it from JSON into the `dest` variable.
+// `dest` must be a pointer to the target data structure.
+// It returns `true` if the key was found (a cache hit), and `false` otherwise (a cache miss).
+// Get 从缓存中检索一个值，并将其从 JSON 反序列化到 `dest` 变量中。
+// `dest` 必须是指向目标数据结构的指针。
+// 如果找到密钥（缓存命中），则返回 `true`，否则返回 `false`（缓存未命中）。
 func (cm *CacheManager) Get(ctx context.Context, key string, dest interface{}, opts *CacheOptions) (bool, error) {
 	fullKey := cm.buildKey(key, opts)
 
@@ -157,7 +161,7 @@ func (cm *CacheManager) Get(ctx context.Context, key string, dest interface{}, o
 	data, err := cm.client.Get(ctx, fullKey).Bytes()
 	if err == redis.Nil {
 		cm.logger.Debug(ctx, "Cache miss", logger.String("key", fullKey))
-		return false, nil
+		return false, nil // Cache miss, not an error
 	}
 	if err != nil {
 		cm.logger.Error(ctx, "Failed to get cache value", err,
@@ -178,15 +182,8 @@ func (cm *CacheManager) Get(ctx context.Context, key string, dest interface{}, o
 	return true, nil
 }
 
-// Delete removes a key from cache.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key to delete
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - error: Delete operation error if any
+// Delete removes a key from the cache.
+// Delete 从缓存中删除一个密钥。
 func (cm *CacheManager) Delete(ctx context.Context, key string, opts *CacheOptions) error {
 	fullKey := cm.buildKey(key, opts)
 
@@ -201,16 +198,10 @@ func (cm *CacheManager) Delete(ctx context.Context, key string, opts *CacheOptio
 	return nil
 }
 
-// DeletePattern deletes all keys matching a pattern.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - pattern: Key pattern (e.g., "user:*")
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - int64: Number of keys deleted
-//   - error: Delete operation error if any
+// DeletePattern removes all keys from the cache that match a given pattern.
+// This operation can be slow and should be used with caution in production environments.
+// DeletePattern 从缓存中删除所有与给定模式匹配的密钥。
+// 此操作可能很慢，在生产环境中应谨慎使用。
 func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string, opts *CacheOptions) (int64, error) {
 	fullPattern := cm.buildKey(pattern, opts)
 
@@ -253,16 +244,8 @@ func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string, opts 
 	return deletedCount, nil
 }
 
-// Exists checks if a key exists in cache.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key to check
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - bool: True if key exists
-//   - error: Exists operation error if any
+// Exists checks for the existence of a key in the cache.
+// Exists 检查缓存中是否存在密钥。
 func (cm *CacheManager) Exists(ctx context.Context, key string, opts *CacheOptions) (bool, error) {
 	fullKey := cm.buildKey(key, opts)
 
@@ -277,16 +260,8 @@ func (cm *CacheManager) Exists(ctx context.Context, key string, opts *CacheOptio
 	return count > 0, nil
 }
 
-// Expire sets a timeout on a key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - ttl: Time-to-live duration
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - error: Expire operation error if any
+// Expire sets a new expiration time for an existing key.
+// Expire 为现有密钥设置新的过期时间。
 func (cm *CacheManager) Expire(ctx context.Context, key string, ttl time.Duration, opts *CacheOptions) error {
 	fullKey := cm.buildKey(key, opts)
 
@@ -307,15 +282,9 @@ func (cm *CacheManager) Expire(ctx context.Context, key string, ttl time.Duratio
 }
 
 // TTL returns the remaining time-to-live of a key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - time.Duration: Remaining TTL, -1 if key has no expiry, -2 if key doesn't exist
-//   - error: TTL operation error if any
+// It returns specific negative values if the key does not exist or has no expiry.
+// TTL 返回密钥的剩余生存时间。
+// 如果密钥不存在或没有过期时间，它将返回特定的负值。
 func (cm *CacheManager) TTL(ctx context.Context, key string, opts *CacheOptions) (time.Duration, error) {
 	fullKey := cm.buildKey(key, opts)
 
@@ -330,15 +299,10 @@ func (cm *CacheManager) TTL(ctx context.Context, key string, opts *CacheOptions)
 	return ttl, nil
 }
 
-// SetMultiple sets multiple key-value pairs in a single operation.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - items: Map of key-value pairs
-//   - opts: Cache options (TTL, namespace)
-//
-// Returns:
-//   - error: Set operation error if any
+// SetMultiple stores multiple key-value pairs in a single, pipelined operation for efficiency.
+// All items will have the same TTL.
+// SetMultiple 通过单个流水线操作高效地存储多个键值对。
+// 所有项目将具有相同的 TTL。
 func (cm *CacheManager) SetMultiple(ctx context.Context, items map[string]interface{}, opts *CacheOptions) error {
 	pipe := cm.client.Pipeline()
 	ttl := cm.getTTL(opts)
@@ -372,16 +336,10 @@ func (cm *CacheManager) SetMultiple(ctx context.Context, items map[string]interf
 	return nil
 }
 
-// GetMultiple retrieves multiple values from cache.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - keys: List of cache keys
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - map[string][]byte: Map of found key-value pairs (as JSON bytes)
-//   - error: Get operation error if any
+// GetMultiple retrieves multiple values from the cache in a single, pipelined operation.
+// It returns a map of found keys to their raw JSON byte values. Keys not found are omitted from the result.
+// GetMultiple 通过单个流水线操作从缓存中检索多个值。
+// 它返回一个将找到的密钥映射到其原始 JSON 字节值的映射。未找到的密钥将从结果中省略。
 func (cm *CacheManager) GetMultiple(ctx context.Context, keys []string, opts *CacheOptions) (map[string][]byte, error) {
 	if len(keys) == 0 {
 		return make(map[string][]byte), nil
@@ -436,17 +394,10 @@ func (cm *CacheManager) GetMultiple(ctx context.Context, keys []string, opts *Ca
 	return results, nil
 }
 
-// Increment atomically increments a numeric key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - delta: Increment amount
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - int64: New value after increment
-//   - error: Increment operation error if any
+// Increment atomically increments the integer value of a key by a given delta.
+// If the key does not exist, it is set to 0 before the operation.
+// Increment 原子地将密钥的整数值增加给定的增量。
+// 如果密钥不存在，它将在操作前被设置为 0。
 func (cm *CacheManager) Increment(ctx context.Context, key string, delta int64, opts *CacheOptions) (int64, error) {
 	fullKey := cm.buildKey(key, opts)
 
@@ -468,17 +419,10 @@ func (cm *CacheManager) Increment(ctx context.Context, key string, delta int64, 
 	return newValue, nil
 }
 
-// Decrement atomically decrements a numeric key.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Cache key
-//   - delta: Decrement amount
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - int64: New value after decrement
-//   - error: Decrement operation error if any
+// Decrement atomically decrements the integer value of a key by a given delta.
+// If the key does not exist, it is set to 0 before the operation.
+// Decrement 原子地将密钥的整数值减少给定的增量。
+// 如果密钥不存在，它将在操作前被设置为 0。
 func (cm *CacheManager) Decrement(ctx context.Context, key string, delta int64, opts *CacheOptions) (int64, error) {
 	fullKey := cm.buildKey(key, opts)
 
@@ -500,17 +444,12 @@ func (cm *CacheManager) Decrement(ctx context.Context, key string, delta int64, 
 	return newValue, nil
 }
 
-// Lock acquires a distributed lock.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Lock key
-//   - ttl: Lock expiration time
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - bool: True if lock acquired
-//   - error: Lock operation error if any
+// Lock attempts to acquire a distributed lock with a specified TTL.
+// It returns `true` if the lock was successfully acquired, and `false` if the lock is already held.
+// This is a non-blocking lock attempt.
+// Lock 尝试获取具有指定 TTL 的分布式锁。
+// 如果成功获取锁，则返回 `true`；如果锁已被持有，则返回 `false`。
+// 这是一个非阻塞的锁尝试。
 func (cm *CacheManager) Lock(ctx context.Context, key string, ttl time.Duration, opts *CacheOptions) (bool, error) {
 	fullKey := cm.buildKey("lock:"+key, opts)
 
@@ -536,15 +475,10 @@ func (cm *CacheManager) Lock(ctx context.Context, key string, ttl time.Duration,
 	return acquired, nil
 }
 
-// Unlock releases a distributed lock.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//   - key: Lock key
-//   - opts: Cache options (namespace)
-//
-// Returns:
-//   - error: Unlock operation error if any
+// Unlock releases a previously acquired distributed lock.
+// It's important that the service that acquired the lock is the one to release it.
+// Unlock 释放先前获取的分布式锁。
+// 获取锁的服务必须是释放锁的服务，这一点很重要。
 func (cm *CacheManager) Unlock(ctx context.Context, key string, opts *CacheOptions) error {
 	fullKey := cm.buildKey("lock:"+key, opts)
 
@@ -559,14 +493,10 @@ func (cm *CacheManager) Unlock(ctx context.Context, key string, opts *CacheOptio
 	return nil
 }
 
-// FlushNamespace deletes all keys in the current namespace.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//
-// Returns:
-//   - int64: Number of keys deleted
-//   - error: Flush operation error if any
+// FlushNamespace deletes all keys within the manager's default namespace.
+// This is a potentially destructive operation and should be used with care.
+// FlushNamespace 删除管理器默认命名空间内的所有密钥。
+// 这是一个潜在的破坏性操作，应谨慎使用。
 func (cm *CacheManager) FlushNamespace(ctx context.Context) (int64, error) {
 	count, err := cm.DeletePattern(ctx, "*", nil)
 	if err != nil {
@@ -581,14 +511,10 @@ func (cm *CacheManager) FlushNamespace(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// GetStats retrieves cache statistics.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//
-// Returns:
-//   - *CacheStats: Cache statistics
-//   - error: Stats operation error if any
+// GetStats retrieves statistics about the cache's performance, such as hits, misses, and hit rate.
+// Note: This can be an expensive operation, especially for calculating total keys in a large namespace.
+// GetStats 检索有关缓存性能的统计信息，例如命中、未命中和命中率。
+// 注意：这可能是一个昂贵的操作，尤其是在计算大命名空间中的总密钥数时。
 func (cm *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
 	stats := &CacheStats{}
 
@@ -612,7 +538,7 @@ func (cm *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
 		keys, nextCursor, err := cm.client.Scan(ctx, cursor, pattern, 1000).Result()
 		if err != nil {
 			cm.logger.Error(ctx, "Failed to scan keys for stats", err)
-			break
+			break // Exit loop on scan error, but return partial stats
 		}
 
 		keyCount += int64(len(keys))
@@ -632,13 +558,10 @@ func (cm *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
 	return stats, nil
 }
 
-// Ping checks Redis connectivity.
-//
-// Parameters:
-//   - ctx: Context for timeout control
-//
-// Returns:
-//   - error: Ping error if any
+// Ping checks the connectivity to the Redis server.
+// It is useful for health checks.
+// Ping 检查与 Redis 服务器的连接性。
+// 它对于健康检查很有用。
 func (cm *CacheManager) Ping(ctx context.Context) error {
 	return cm.client.Ping(ctx).Err()
 }

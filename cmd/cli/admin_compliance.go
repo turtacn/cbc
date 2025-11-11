@@ -8,15 +8,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// complianceReportCmd represents the compliance report command
+// complianceReportCmd defines the `cbc-admin compliance report` command.
+// It connects to the database and generates a simple report of compliance classes for each tenant.
+// complianceReportCmd 定义了 `cbc-admin compliance report` 命令。
+// 它连接到数据库并为每个租户生成一个简单的合规性类别报告。
 var complianceReportCmd = &cobra.Command{
 	Use:   "report",
-	Short: "Generate a compliance report",
+	Short: "Generate a basic compliance report for all tenants",
+	Long: `Connects to the database and queries tenant configurations to produce a report
+showing the assigned compliance class for each tenant.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Database connection string should be passed in via a flag or config file
 		dbURL, _ := cmd.Flags().GetString("db-url")
 		if dbURL == "" {
-			return fmt.Errorf("db-url flag is required")
+			return fmt.Errorf("--db-url flag is required")
 		}
 
 		dbpool, err := pgxpool.New(context.Background(), dbURL)
@@ -25,35 +29,41 @@ var complianceReportCmd = &cobra.Command{
 		}
 		defer dbpool.Close()
 
-		// Query the database and generate the report
-		// This is a simplified example. A real report would be more comprehensive.
+		// This is a simplified example. A real-world report would be more comprehensive,
+		// potentially joining with other tables to show key rotation status, etc.
 		rows, err := dbpool.Query(context.Background(), "SELECT tenant_id, compliance_class FROM tenant_configs")
 		if err != nil {
 			return fmt.Errorf("failed to query tenant_configs: %w", err)
 		}
 		defer rows.Close()
 
-		fmt.Println("Compliance Report:")
+		fmt.Println("--- Tenant Compliance Report ---")
 		for rows.Next() {
 			var tenantID, complianceClass string
 			if err := rows.Scan(&tenantID, &complianceClass); err != nil {
 				return fmt.Errorf("failed to scan row: %w", err)
 			}
-			fmt.Printf("- Tenant: %s, Compliance Class: %s\n", tenantID, complianceClass)
+			fmt.Printf("  - Tenant: %s, Compliance Class: %s\n", tenantID, complianceClass)
 		}
+		fmt.Println("---------------------------------")
 
 		return nil
 	},
 }
 
+// getRiskCmd defines the `cbc-admin compliance get-risk` command.
+// It retrieves and displays the current risk profile for a specified tenant.
+// getRiskCmd 定义了 `cbc-admin compliance get-risk` 命令。
+// 它检索并显示指定租户的当前风险配置文件。
 var getRiskCmd = &cobra.Command{
 	Use:   "get-risk",
-	Short: "Get the risk profile for a tenant",
+	Short: "Get the dynamic risk profile for a specific tenant",
+	Long:  `Queries the database for a tenant's latest anomaly score and predicted threat level.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbURL, _ := cmd.Flags().GetString("db-url")
 		tenantID, _ := cmd.Flags().GetString("tenant")
 		if dbURL == "" || tenantID == "" {
-			return fmt.Errorf("db-url and tenant flags are required")
+			return fmt.Errorf("--db-url and --tenant flags are required")
 		}
 
 		dbpool, err := pgxpool.New(context.Background(), dbURL)
@@ -68,27 +78,33 @@ var getRiskCmd = &cobra.Command{
 			"SELECT anomaly_score, predicted_threat FROM tenant_risk_scores WHERE tenant_id = $1",
 			tenantID).Scan(&anomalyScore, &predictedThreat)
 		if err != nil {
-			return fmt.Errorf("failed to query tenant_risk_scores: %w", err)
+			return fmt.Errorf("failed to query tenant risk scores: %w", err)
 		}
 
-		fmt.Printf("Risk profile for tenant %s:\n", tenantID)
-		fmt.Printf("- Anomaly Score: %.4f\n", anomalyScore)
-		fmt.Printf("- Predicted Threat: %s\n", predictedThreat)
+		fmt.Printf("Dynamic Risk Profile for Tenant '%s':\n", tenantID)
+		fmt.Printf("  - Anomaly Score:    %.4f\n", anomalyScore)
+		fmt.Printf("  - Predicted Threat: %s\n", predictedThreat)
 
 		return nil
 	},
 }
 
+// setRiskCmd defines the `cbc-admin compliance set-risk` command.
+// It allows manually setting or updating the risk profile for a tenant, simulating an update from an ML system.
+// setRiskCmd 定义了 `cbc-admin compliance set-risk` 命令。
+// 它允许手动设置或更新租户的风险配置文件，模拟来自 ML 系统的更新。
 var setRiskCmd = &cobra.Command{
 	Use:   "set-risk",
-	Short: "Set the risk profile for a tenant",
+	Short: "Manually set the dynamic risk profile for a tenant",
+	Long: `Inserts or updates a tenant's risk profile in the database.
+This is useful for testing risk-based policies or for manual intervention.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbURL, _ := cmd.Flags().GetString("db-url")
 		tenantID, _ := cmd.Flags().GetString("tenant")
 		score, _ := cmd.Flags().GetFloat64("score")
 		threat, _ := cmd.Flags().GetString("threat")
 		if dbURL == "" || tenantID == "" || threat == "" {
-			return fmt.Errorf("db-url, tenant, and threat flags are required")
+			return fmt.Errorf("--db-url, --tenant, and --threat flags are required")
 		}
 
 		dbpool, err := pgxpool.New(context.Background(), dbURL)
@@ -106,10 +122,10 @@ var setRiskCmd = &cobra.Command{
 			 last_updated = NOW()`,
 			tenantID, score, threat)
 		if err != nil {
-			return fmt.Errorf("failed to upsert tenant_risk_scores: %w", err)
+			return fmt.Errorf("failed to upsert tenant risk scores: %w", err)
 		}
 
-		fmt.Printf("Successfully set risk profile for tenant %s\n", tenantID)
+		fmt.Printf("Successfully set risk profile for tenant '%s'\n", tenantID)
 		return nil
 	},
 }

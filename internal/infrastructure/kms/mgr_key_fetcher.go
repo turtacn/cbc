@@ -17,12 +17,12 @@ import (
 
 type MgrKeyFetcher struct {
 	vaultClient *api.Client
-	redisClient *redis.Client
+	redisClient redis.UniversalClient
 	l1Cache     sync.Map
 	sf          singleflight.Group
 }
 
-func NewMgrKeyFetcher(vaultClient *api.Client, redisClient *redis.Client) *MgrKeyFetcher {
+func NewMgrKeyFetcher(vaultClient *api.Client, redisClient redis.UniversalClient) *MgrKeyFetcher {
 	return &MgrKeyFetcher{
 		vaultClient: vaultClient,
 		redisClient: redisClient,

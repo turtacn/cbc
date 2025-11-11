@@ -12,23 +12,21 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
+	appMocks "github.com/turtacn/cbc/internal/application/service/mocks"
+	domainMocks "github.com/turtacn/cbc/internal/domain/service/mocks"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	"github.com/turtacn/cbc/pkg/errors"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/internal/domain/service/mocks"
 )
 
 func TestAuthHandler_RefreshToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := logger.NewNoopLogger()
-	metrics := new(mocks.MockHTTPMetrics)
-	metrics.On("RecordRequestStart", mock.Anything, mock.Anything).Return()
-	metrics.On("RecordRequestDuration", mock.Anything, mock.Anything, mock.Anything, mock.AnythingOfType("time.Duration")).Return()
-	metrics.On("RecordRequestError", mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t.Run("success", func(t *testing.T) {
-		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
+		mockAuthApp := new(domainMocks.MockAuthAppService)
+		mockDeviceAuthApp := new(appMocks.MockDeviceAuthAppService)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, mockDeviceAuthApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -50,8 +48,9 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 	})
 
 	t.Run("invalid request", func(t *testing.T) {
-		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
+		mockAuthApp := new(domainMocks.MockAuthAppService)
+		mockDeviceAuthApp := new(appMocks.MockDeviceAuthAppService)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, mockDeviceAuthApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -68,14 +67,11 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 func TestAuthHandler_RevokeToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := logger.NewNoopLogger()
-	metrics := new(mocks.MockHTTPMetrics)
-	metrics.On("RecordRequestStart", mock.Anything, mock.Anything).Return()
-	metrics.On("RecordRequestDuration", mock.Anything, mock.Anything, mock.Anything, mock.AnythingOfType("time.Duration")).Return()
-	metrics.On("RecordRequestError", mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t.Run("success", func(t *testing.T) {
-		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
+		mockAuthApp := new(domainMocks.MockAuthAppService)
+		mockDeviceAuthApp := new(appMocks.MockDeviceAuthAppService)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, mockDeviceAuthApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -93,8 +89,9 @@ func TestAuthHandler_RevokeToken(t *testing.T) {
 	})
 
 	t.Run("service error", func(t *testing.T) {
-		mockAuthApp := new(mocks.MockAuthAppService)
-		authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
+		mockAuthApp := new(domainMocks.MockAuthAppService)
+		mockDeviceAuthApp := new(appMocks.MockDeviceAuthAppService)
+		authHandler := handlers.NewAuthHandler(mockAuthApp, mockDeviceAuthApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)

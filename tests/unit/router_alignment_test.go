@@ -13,11 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
+	appMocks "github.com/turtacn/cbc/internal/application/service/mocks"
 	"github.com/turtacn/cbc/internal/config"
+	domainMocks "github.com/turtacn/cbc/internal/domain/service/mocks"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/internal/domain/service/mocks"
 )
 
 func Test_Routes_Are_Mounted(t *testing.T) {
@@ -25,15 +26,12 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 
 	cfg := &config.Config{} // 默认即可
 	log := logger.NewNoopLogger()
-	metrics := new(mocks.MockHTTPMetrics)
-	metrics.On("RecordRequestStart", mock.Anything, mock.Anything).Return()
-	metrics.On("RecordRequestDuration", mock.Anything, mock.Anything, mock.Anything, mock.AnythingOfType("time.Duration")).Return()
-	metrics.On("RecordRequestError", mock.Anything, mock.Anything, mock.Anything).Return()
 
-	mockAuthApp := new(mocks.MockAuthAppService)
-	mockDeviceApp := new(mocks.MockDeviceAppService)
-	mockKMS := new(mocks.KeyManagementService)
-	mockRedis := new(mocks.MockRedisConnectionManager)
+	mockAuthApp := new(domainMocks.AuthAppService)
+	mockDeviceApp := new(domainMocks.DeviceAppService)
+	mockDeviceAuthApp := new(appMocks.MockDeviceAuthAppService)
+	mockKMS := new(domainMocks.KeyManagementService)
+	mockRedis := new(domainMocks.RedisConnectionManager)
 
 	// Mock any necessary method calls to prevent panics
 	pk, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -48,11 +46,12 @@ func Test_Routes_Are_Mounted(t *testing.T) {
 	mockDeviceApp.On("UpdateDeviceInfo", mock.Anything, mock.Anything, mock.Anything).Return(&dto.DeviceResponse{}, nil)
 	mockKMS.On("GetTenantPublicKeys", mock.Anything, mock.Anything).Return(map[string]*rsa.PublicKey{"kid-1": &pk.PublicKey}, nil)
 
-	authHandler := handlers.NewAuthHandler(mockAuthApp, nil, metrics, log)
-	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
-	jwksHandler := handlers.NewJWKSHandler(mockKMS, log, metrics)
+	authHandler := handlers.NewAuthHandler(mockAuthApp, mockDeviceAuthApp, log)
+	deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, log)
+	jwksHandler := handlers.NewJWKSHandler(mockKMS, log)
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
-	oauthHandler := handlers.NewOAuthHandler(nil)
+	oauthHandler := handlers.NewOAuthHandler(mockDeviceAuthApp)
+
 
 	r := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, nil, nil, nil, nil)
 	r.SetupRoutes()

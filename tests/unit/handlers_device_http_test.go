@@ -21,14 +21,10 @@ import (
 func TestDeviceHandler_GetDevice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := logger.NewNoopLogger()
-	metrics := new(mocks.MockHTTPMetrics)
-	metrics.On("RecordRequestStart", mock.Anything, mock.Anything).Return()
-	metrics.On("RecordRequestDuration", mock.Anything, mock.Anything, mock.Anything, mock.AnythingOfType("time.Duration")).Return()
-	metrics.On("RecordRequestError", mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t.Run("success", func(t *testing.T) {
 		mockDeviceApp := new(mocks.MockDeviceAppService)
-		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
+		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -49,7 +45,7 @@ func TestDeviceHandler_GetDevice(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		mockDeviceApp := new(mocks.MockDeviceAppService)
-		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
+		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -68,14 +64,10 @@ func TestDeviceHandler_GetDevice(t *testing.T) {
 func TestDeviceHandler_UpdateDevice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := logger.NewNoopLogger()
-	metrics := new(mocks.MockHTTPMetrics)
-	metrics.On("RecordRequestStart", mock.Anything, mock.Anything).Return()
-	metrics.On("RecordRequestDuration", mock.Anything, mock.Anything, mock.Anything, mock.AnythingOfType("time.Duration")).Return()
-	metrics.On("RecordRequestError", mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t.Run("success", func(t *testing.T) {
 		mockDeviceApp := new(mocks.MockDeviceAppService)
-		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
+		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -95,7 +87,7 @@ func TestDeviceHandler_UpdateDevice(t *testing.T) {
 
 	t.Run("invalid request", func(t *testing.T) {
 		mockDeviceApp := new(mocks.MockDeviceAppService)
-		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, metrics, log)
+		deviceHandler := handlers.NewDeviceHandler(mockDeviceApp, log)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)

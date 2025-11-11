@@ -19,24 +19,28 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// Router HTTP 路由器
+// Router encapsulates the Gin engine and all HTTP handlers and middleware for the main public-facing API.
+// It is responsible for setting up routes, starting the server, and handling graceful shutdown.
+// Router 封装了 Gin 引擎以及主面向公众 API 的所有 HTTP 处理程序和中间件。
+// 它负责设置路由、启动服务器和处理正常关闭。
 type Router struct {
-	engine                *gin.Engine
-	config                *config.Config
-	logger                logger.Logger
-	healthHandler         *handlers.HealthHandler
-	authHandler           *handlers.AuthHandler
-	oauthHandler          *handlers.OAuthHandler
-	deviceHandler         *handlers.DeviceHandler
-	jwksHandler           *handlers.JWKSHandler
-	authMiddleware        gin.HandlerFunc
-	rateLimitMiddleware   gin.HandlerFunc
-	idempotencyMiddleware gin.HandlerFunc
+	engine                  *gin.Engine
+	config                  *config.Config
+	logger                  logger.Logger
+	healthHandler           *handlers.HealthHandler
+	authHandler             *handlers.AuthHandler
+	oauthHandler            *handlers.OAuthHandler
+	deviceHandler           *handlers.DeviceHandler
+	jwksHandler             *handlers.JWKSHandler
+	authMiddleware          gin.HandlerFunc
+	rateLimitMiddleware     gin.HandlerFunc
+	idempotencyMiddleware   gin.HandlerFunc
 	observabilityMiddleware gin.HandlerFunc
-	server                *http.Server
+	server                  *http.Server
 }
 
-// NewRouter 创建路由器
+// NewRouter creates and configures a new Router instance with all its dependencies.
+// NewRouter 创建并配置一个新的 Router 实例及其所有依赖项。
 func NewRouter(
 	cfg *config.Config,
 	log logger.Logger,
@@ -50,35 +54,35 @@ func NewRouter(
 	idempotencyMiddleware gin.HandlerFunc,
 	observabilityMiddleware gin.HandlerFunc,
 ) *Router {
-	// 设置 Gin 模式
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
 	return &Router{
-		engine:                engine,
-		config:                cfg,
-		logger:                log,
-		healthHandler:         healthHandler,
-		authHandler:           authHandler,
-		oauthHandler:          oauthHandler,
-		deviceHandler:         deviceHandler,
-		jwksHandler:           jwksHandler,
-		authMiddleware:        authMiddleware,
-		rateLimitMiddleware:   rateLimitMiddleware,
-		idempotencyMiddleware: idempotencyMiddleware,
+		engine:                  engine,
+		config:                  cfg,
+		logger:                  log,
+		healthHandler:           healthHandler,
+		authHandler:             authHandler,
+		oauthHandler:            oauthHandler,
+		deviceHandler:           deviceHandler,
+		jwksHandler:             jwksHandler,
+		authMiddleware:          authMiddleware,
+		rateLimitMiddleware:     rateLimitMiddleware,
+		idempotencyMiddleware:   idempotencyMiddleware,
 		observabilityMiddleware: observabilityMiddleware,
 	}
 }
 
-// SetupRoutes 设置路由
+// SetupRoutes configures all the middleware and API endpoints for the main router.
+// SetupRoutes 为主路由器配置所有中间件和 API 端点。
 func (r *Router) SetupRoutes() {
-	// 全局中间件
+	// Apply global middleware.
 	r.engine.Use(gin.Recovery())
 	r.engine.Use(r.observabilityMiddleware)
 
-	// CORS 配置
+	// Configure CORS.
 	corsConfig := cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     []string{"*"}, // Should be restricted in production
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Request-ID"},
 		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"},
@@ -87,22 +91,19 @@ func (r *Router) SetupRoutes() {
 	}
 	r.engine.Use(cors.New(corsConfig))
 
-	// 健康检查路由（不需要认证）
+	// Public routes (health checks, metrics).
 	r.engine.GET("/health/live", r.healthHandler.LivenessCheck)
 	r.engine.GET("/health/ready", r.healthHandler.ReadinessCheck)
-	// 兼容旧路径（过渡期）
 	r.engine.GET("/live", r.healthHandler.LivenessCheck)
 	r.engine.GET("/ready", r.healthHandler.ReadinessCheck)
-
-	// Prometheus metrics
 	r.engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	// Pprof 性能分析（仅在非生产环境）
+	// Pprof profiling routes (enabled only in non-production environments).
 	if r.config.Observability.PprofEnabled {
 		pprof.Register(r.engine)
 	}
 
-	// API 路由组
+	// API v1 route group with shared middleware.
 	v1 := r.engine.Group("/api/v1")
 	v1.Use(r.idempotencyMiddleware)
 	v1.Use(r.rateLimitMiddleware)
@@ -117,10 +118,12 @@ func (r *Router) SetupRoutes() {
 		oauth := v1.Group("/oauth")
 		{
 			oauth.POST("/device_authorization", r.oauthHandler.StartDeviceAuthorization)
+			// Dev-only endpoint for simulating user verification.
 			if r.config.OAuth.DevVerifyAPIEnabled {
 				oauth.POST("/verify", r.oauthHandler.VerifyUserCode)
 			}
 		}
+		// Device routes require authentication.
 		devices := v1.Group("/devices")
 		devices.Use(r.authMiddleware)
 		{
@@ -130,7 +133,7 @@ func (r *Router) SetupRoutes() {
 		}
 	}
 
-	// 404 处理
+	// Custom 404 Not Found handler.
 	r.engine.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":             "not_found",
@@ -139,7 +142,10 @@ func (r *Router) SetupRoutes() {
 	})
 }
 
-// Start 启动 HTTP 服务器
+// Start initializes and starts the HTTP server.
+// It also sets up a graceful shutdown mechanism.
+// Start 初始化并启动 HTTP 服务器。
+// 它还设置了正常关闭机制。
 func (r *Router) Start() error {
 	r.SetupRoutes()
 
@@ -153,19 +159,21 @@ func (r *Router) Start() error {
 		MaxHeaderBytes: 1 << 20, // 1MB
 	}
 
-	r.logger.Info(context.Background(), "Starting HTTP server", logger.String("address", addr))
+	r.logger.Info(context.Background(), "Starting main HTTP server", logger.String("address", addr))
 
-	// 优雅关闭
+	// Run the graceful shutdown handler in a separate goroutine.
 	go r.gracefulShutdown()
 
 	if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		r.logger.Error(context.Background(), "HTTP server failed to start", err)
 		return err
 	}
 
 	return nil
 }
 
-// gracefulShutdown 优雅关闭服务器
+// gracefulShutdown listens for termination signals (SIGINT, SIGTERM) and gracefully shuts down the server.
+// gracefulShutdown 侦听终止信号 (SIGINT, SIGTERM) 并正常关闭服务器。
 func (r *Router) gracefulShutdown() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -177,43 +185,50 @@ func (r *Router) gracefulShutdown() {
 	defer cancel()
 
 	if err := r.server.Shutdown(ctx); err != nil {
-		r.logger.Error(context.Background(), "Server forced to shutdown", err)
+		r.logger.Error(context.Background(), "Server forced to shutdown due to error", err)
 	}
 
-	r.logger.Info(context.Background(), "HTTP server stopped")
+	r.logger.Info(context.Background(), "HTTP server stopped gracefully")
 }
 
-// Stop 停止 HTTP 服务器
+// Stop gracefully stops the HTTP server.
+// Stop 正常停止 HTTP 服务器。
 func (r *Router) Stop(ctx context.Context) error {
 	if r.server == nil {
 		return nil
 	}
-
 	r.logger.Info(ctx, "Stopping HTTP server...")
 	return r.server.Shutdown(ctx)
 }
 
+// Engine returns the underlying Gin engine, useful for testing.
+// Engine 返回底层的 Gin 引擎，可用于测试。
 func (r *Router) Engine() *gin.Engine {
 	return r.engine
 }
 
-// InternalRouter is a simplified router for internal APIs.
+// InternalRouter encapsulates the Gin engine and handlers for the internal-only API.
+// This router runs on a separate port and is not exposed to the public.
+// InternalRouter 封装了仅供内部使用的 API 的 Gin 引擎和处理程序。
+// 该路由器在单独的端口上运行，不对公众公开。
 type InternalRouter struct {
 	engine          *gin.Engine
 	mlInternalHandler *handlers.MLInternalHandler
 }
 
-// NewInternalRouter creates a new InternalRouter.
+// NewInternalRouter creates a new instance of the InternalRouter.
+// NewInternalRouter 创建一个新的 InternalRouter 实例。
 func NewInternalRouter(mlInternalHandler *handlers.MLInternalHandler) *InternalRouter {
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	engine.Use(gin.Recovery()) // Use a basic recovery middleware.
 	return &InternalRouter{
 		engine:          engine,
 		mlInternalHandler: mlInternalHandler,
 	}
 }
 
-// SetupRoutes sets up the routes for the internal API.
+// SetupRoutes configures the routes for the internal-only API.
+// SetupRoutes 配置仅供内部使用的 API 的路由。
 func (r *InternalRouter) SetupRoutes() {
 	internal := r.engine.Group("/_internal")
 	{
@@ -224,7 +239,8 @@ func (r *InternalRouter) SetupRoutes() {
 	}
 }
 
-// Engine returns the Gin engine.
+// Engine returns the underlying Gin engine for the internal router.
+// Engine 返回内部路由器的底层 Gin 引擎。
 func (r *InternalRouter) Engine() *gin.Engine {
 	return r.engine
 }

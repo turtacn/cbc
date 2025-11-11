@@ -15,14 +15,17 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// DeviceRepoImpl implements DeviceRepository interface using PostgreSQL.
-// It manages device registration, trust scoring, and fingerprint validation.
+// DeviceRepoImpl provides the PostgreSQL implementation of the DeviceRepository interface.
+// It handles the persistence and retrieval of device information.
+// DeviceRepoImpl 提供了 DeviceRepository 接口的 PostgreSQL 实现。
+// 它处理设备信息的持久化和检索。
 type DeviceRepoImpl struct {
 	db     *gorm.DB
 	logger logger.Logger
 }
 
-// NewDeviceRepository creates a new PostgreSQL-based device repository instance.
+// NewDeviceRepository creates a new instance of the PostgreSQL-based device repository.
+// NewDeviceRepository 创建一个新的基于 PostgreSQL 的设备仓库实例。
 func NewDeviceRepository(db *gorm.DB, log logger.Logger) repository.DeviceRepository {
 	return &DeviceRepoImpl{
 		db:     db,
@@ -30,7 +33,10 @@ func NewDeviceRepository(db *gorm.DB, log logger.Logger) repository.DeviceReposi
 	}
 }
 
-// Save registers a new device in the system.
+// Save persists a new device record to the database.
+// It sets the initial timestamps and handles potential unique constraint violations.
+// Save 将新的设备记录持久化到数据库。
+// 它设置初始时间戳并处理潜在的唯一约束冲突。
 func (r *DeviceRepoImpl) Save(ctx context.Context, d *models.Device) error {
 	startTime := time.Now()
 
@@ -58,7 +64,10 @@ func (r *DeviceRepoImpl) Save(ctx context.Context, d *models.Device) error {
 	return nil
 }
 
-// FindByID retrieves a device by its unique identifier.
+// FindByID retrieves a single device from the database by its unique device ID.
+// It returns a `DeviceNotFound` error if no matching record is found.
+// FindByID 通过其唯一的设备 ID 从数据库中检索单个设备。
+// 如果找不到匹配的记录，它将返回 `DeviceNotFound` 错误。
 func (r *DeviceRepoImpl) FindByID(ctx context.Context, agentID string) (*models.Device, error) {
 	var device models.Device
 
@@ -80,7 +89,12 @@ func (r *DeviceRepoImpl) FindByID(ctx context.Context, agentID string) (*models.
 	return &device, nil
 }
 
-// Update modifies an existing device record.
+// Update modifies the details of an existing device in the database.
+// It automatically updates the `UpdatedAt` timestamp.
+// It returns a `DeviceNotFound` error if the device to be updated does not exist.
+// Update 修改数据库中现有设备的详细信息。
+// 它会自动更新 `UpdatedAt` 时间戳。
+// 如果要更新的设备不存在，它将返回 `DeviceNotFound` 错误。
 func (r *DeviceRepoImpl) Update(ctx context.Context, device *models.Device) error {
 	device.UpdatedAt = time.Now()
 
@@ -108,7 +122,10 @@ func (r *DeviceRepoImpl) Update(ctx context.Context, device *models.Device) erro
 	return nil
 }
 
-// FindByTenantID retrieves a list of devices for a given tenant.
+// FindByTenantID retrieves a paginated list of devices associated with a specific tenant ID.
+// It also returns the total count of devices for that tenant to aid in pagination.
+// FindByTenantID 检索与特定租户 ID 关联的设备的分页列表。
+// 它还返回该租户的设备总数以帮助分页。
 func (r *DeviceRepoImpl) FindByTenantID(ctx context.Context, tenantID string, page, pageSize int) ([]*models.Device, int64, error) {
 	var devices []*models.Device
 	var total int64
@@ -131,7 +148,10 @@ func (r *DeviceRepoImpl) FindByTenantID(ctx context.Context, tenantID string, pa
 	return devices, total, nil
 }
 
-
+// mapPgErr is a helper function to translate specific PostgreSQL errors into domain-specific errors.
+// For example, it maps a unique violation error (code 23505) to a more meaningful "device already exists" error.
+// mapPgErr 是一个辅助函数，用于将特定的 PostgreSQL 错误转换为领域特定的错误。
+// 例如，它将唯一性冲突错误（代码 23505）映射为更有意义的“设备已存在”错误。
 func mapPgErr(err error) error {
 	if pgErr, ok := err.(*pgconn.PgError); ok {
 		if pgErr.Code == "23505" { // unique_violation

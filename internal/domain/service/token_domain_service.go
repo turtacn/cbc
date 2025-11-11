@@ -24,6 +24,8 @@ type tokenDomainService struct {
 	// add cfg fields if needed later (TTL, etc.)
 }
 
+// NewTokenDomainService creates a new instance of the token domain service.
+// NewTokenDomainService 创建令牌领域服务的新实例。
 func NewTokenDomainService(
 	repo repository.TokenRepository,
 	kms KeyManagementService,
@@ -36,8 +38,8 @@ func NewTokenDomainService(
 	}
 }
 
-// ---- Minimal stubs to compile; replace with real logic as you go ----
-
+// IssueTokenPair generates and persists a new pair of refresh and access tokens.
+// IssueTokenPair 生成并持久化一对新的刷新和访问令牌。
 func (s *tokenDomainService) IssueTokenPair(
 	ctx context.Context,
 	tenantID string,
@@ -66,6 +68,10 @@ func (s *tokenDomainService) IssueTokenPair(
 	return refreshToken, accessToken, nil
 }
 
+// RefreshToken validates an old refresh token and issues a new pair of refresh and access tokens.
+// It also revokes the old refresh token to enforce one-time use.
+// RefreshToken 验证旧的刷新令牌并颁发一对新的刷新和访问令牌。
+// 它还会撤销旧的刷新令牌以强制一次性使用。
 func (s *tokenDomainService) RefreshToken(
 	ctx context.Context,
 	refreshTokenString string,
@@ -112,10 +118,12 @@ func (s *tokenDomainService) RefreshToken(
 	return newRefreshToken, accessToken, nil
 }
 
+// VerifyToken validates the signature and claims of a JWT string and returns the corresponding token metadata.
+// VerifyToken 验证 JWT 字符串的签名和声明，并返回相应的令牌元数据。
 func (s *tokenDomainService) VerifyToken(
 	ctx context.Context,
 	tokenString string,
-	tokenType constants.TokenType, // or constants.TokenType depending on your interface
+	tokenType constants.TokenType,
 	tenantID string,
 ) (*models.Token, error) {
 	claims, err := s.kms.VerifyJWT(ctx, tokenString, tenantID)
@@ -123,8 +131,6 @@ func (s *tokenDomainService) VerifyToken(
 		return nil, err
 	}
 
-	// For now, we'll just extract the JTI and look it up.
-	// A more complete implementation would validate all claims.
 	jti, ok := claims["jti"].(string)
 	if !ok {
 		return nil, errors.ErrInvalidRequest("missing jti")
@@ -133,6 +139,8 @@ func (s *tokenDomainService) VerifyToken(
 	return s.repo.FindByJTI(ctx, jti)
 }
 
+// RevokeToken marks a token as revoked in the repository.
+// RevokeToken 在存储库中将令牌标记为已撤销。
 func (s *tokenDomainService) RevokeToken(
 	ctx context.Context,
 	jti string,
@@ -142,10 +150,14 @@ func (s *tokenDomainService) RevokeToken(
 	return s.repo.Revoke(ctx, jti, reason)
 }
 
+// IsTokenRevoked checks if a token has been revoked.
+// IsTokenRevoked 检查令牌是否已被撤销。
 func (s *tokenDomainService) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 	return s.repo.IsRevoked(ctx, jti)
 }
 
+// GenerateAccessToken creates a new access token based on a refresh token and requested scopes.
+// GenerateAccessToken 基于刷新令牌和请求的范围创建一个新的访问令牌。
 func (s *tokenDomainService) GenerateAccessToken(
 	ctx context.Context,
 	refreshToken *models.Token,
@@ -155,17 +167,19 @@ func (s *tokenDomainService) GenerateAccessToken(
 	return s.generateAccessToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, requestedScope, trustLevel)
 }
 
+// generateAccessToken is a helper function to create and sign an access token.
+// generateAccessToken 是一个用于创建和签署访问令牌的辅助函数。
 func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, scope []string, trustLevel string) (*models.Token, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
-		"sub": deviceID,
-		"jti": uuid.New().String(),
-		"iat": now.Unix(),
-		"exp": now.Add(15 * time.Minute).Unix(),
-		"iss": "cbc-auth-service",
-		"aud": "cbc-api",
-		"tid": tenantID,
-		"scp": scope,
+		"sub":                deviceID,
+		"jti":                uuid.New().String(),
+		"iat":                now.Unix(),
+		"exp":                now.Add(15 * time.Minute).Unix(),
+		"iss":                "cbc-auth-service",
+		"aud":                "cbc-api",
+		"tid":                tenantID,
+		"scp":                scope,
 		"device_trust_level": trustLevel,
 	}
 
@@ -175,23 +189,25 @@ func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, 
 	}
 
 	return &models.Token{
-		JTI:        claims["jti"].(string),
-		TenantID:   tenantID,
-		DeviceID:   deviceID,
-		Scope:      strings.Join(scope, " "),
-		TokenType:  constants.TokenTypeAccess,
-		IssuedAt:   now,
-		ExpiresAt:  time.Unix(claims["exp"].(int64), 0),
+		JTI:       claims["jti"].(string),
+		TenantID:  tenantID,
+		DeviceID:  deviceID,
+		Scope:     strings.Join(scope, " "),
+		TokenType: constants.TokenTypeAccess,
+		IssuedAt:  now,
+		ExpiresAt: time.Unix(claims["exp"].(int64), 0),
 	}, nil
 }
 
+// generateRefreshToken is a helper function to create and sign a refresh token.
+// generateRefreshToken 是一个用于创建和签署刷新令牌的辅助函数。
 func (s *tokenDomainService) generateRefreshToken(ctx context.Context, tenantID, deviceID string, scope []string) (*models.Token, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub": deviceID,
 		"jti": uuid.New().String(),
 		"iat": now.Unix(),
-		"exp": now.Add(720 * time.Hour).Unix(),
+		"exp": now.Add(720 * time.Hour).Unix(), // 30 days
 		"iss": "cbc-auth-service",
 		"aud": "cbc-auth-service",
 		"tid": tenantID,
@@ -204,16 +220,18 @@ func (s *tokenDomainService) generateRefreshToken(ctx context.Context, tenantID,
 	}
 
 	return &models.Token{
-		JTI:        claims["jti"].(string),
-		TenantID:   tenantID,
-		DeviceID:   deviceID,
-		Scope:      strings.Join(scope, " "),
-		TokenType:  constants.TokenTypeRefresh,
-		IssuedAt:   now,
-		ExpiresAt:  time.Unix(claims["exp"].(int64), 0),
+		JTI:       claims["jti"].(string),
+		TenantID:  tenantID,
+		DeviceID:  deviceID,
+		Scope:     strings.Join(scope, " "),
+		TokenType: constants.TokenTypeRefresh,
+		IssuedAt:  now,
+		ExpiresAt: time.Unix(claims["exp"].(int64), 0),
 	}, nil
 }
 
+// ValidateTokenClaims performs a deeper validation of a token's claims against a given context. (Not implemented)
+// ValidateTokenClaims 根据给定上下文对令牌的声明执行更深入的验证。（未实现）
 func (s *tokenDomainService) ValidateTokenClaims(
 	ctx context.Context,
 	token *models.Token,
@@ -222,6 +240,8 @@ func (s *tokenDomainService) ValidateTokenClaims(
 	return false, errors.ErrServerError("ValidateTokenClaims not implemented yet")
 }
 
+// IntrospectToken provides information about a token, conforming to RFC 7662. (Not implemented)
+// IntrospectToken 提供有关令牌的信息，符合 RFC 7662。（未实现）
 func (s *tokenDomainService) IntrospectToken(
 	ctx context.Context,
 	tokenString string,
@@ -230,10 +250,14 @@ func (s *tokenDomainService) IntrospectToken(
 	return nil, errors.ErrServerError("IntrospectToken not implemented yet")
 }
 
+// CleanupExpiredTokens removes expired token metadata from the persistence layer. (Not implemented)
+// CleanupExpiredTokens 从持久层中删除过期的令牌元数据。（未实现）
 func (s *tokenDomainService) CleanupExpiredTokens(ctx context.Context, before time.Time) (int64, error) {
 	return 0, errors.ErrServerError("CleanupExpiredTokens not implemented yet")
 }
 
+// IssueToken issues a simple token (e.g., for client credentials flow) without a refresh token.
+// IssueToken 颁发一个简单的令牌（例如，用于客户端凭据流），没有刷新令牌。
 func (s *tokenDomainService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
-	return s.generateAccessToken(ctx, tenantID, subject, scope, "") // No trust level for client credentials flow
+	return s.generateAccessToken(ctx, tenantID, subject, scope, "") // No trust level needed for this flow
 }

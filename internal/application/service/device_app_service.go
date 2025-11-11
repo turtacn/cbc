@@ -21,31 +21,43 @@ import (
 )
 
 //go:generate mockery --name DeviceAppService --output ../../domain/service/mocks --outpkg mocks
-// DeviceAppService defines the interface for device application service
+
+// DeviceAppService defines the application service interface for device management use cases.
+// It orchestrates domain services and repositories to handle device-related operations.
+// DeviceAppService 定义了设备管理用例的应用程序服务接口。
+// 它协调领域服务和存储库来处理与设备相关的操作。
 type DeviceAppService interface {
-	// RegisterDevice registers a new device in the system
+	// RegisterDevice registers a new device in the system after verifying the MGR client assertion.
+	// RegisterDevice 在验证 MGR 客户端断言后在系统中注册一个新设备。
 	RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.DeviceResponse, error)
 
-	// GetDeviceInfo retrieves device information by agent ID
+	// GetDeviceInfo retrieves detailed information for a specific device by its agent ID.
+	// GetDeviceInfo 通过其代理 ID 检索特定设备的详细信息。
 	GetDeviceInfo(ctx context.Context, agentID string) (*dto.DeviceResponse, error)
 
-	// UpdateDeviceInfo updates device information
+	// UpdateDeviceInfo updates mutable information for an existing device.
+	// UpdateDeviceInfo 更新现有设备的可变信息。
 	UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.UpdateDeviceRequest) (*dto.DeviceResponse, error)
 
-	// UpdateDeviceTrustLevel updates device trust level
+	// UpdateDeviceTrustLevel manually sets the trust level for a device.
+	// UpdateDeviceTrustLevel 手动设置设备的信任级别。
 	UpdateDeviceTrustLevel(ctx context.Context, agentID string, trustLevel constants.TrustLevel) error
 
-	// DeactivateDevice deactivates a device
+	// DeactivateDevice deactivates a device, preventing it from authenticating.
+	// DeactivateDevice 停用设备，阻止其进行身份验证。
 	DeactivateDevice(ctx context.Context, agentID string, reason string) error
 
-	// ListDevicesByTenant lists all devices for a tenant
+	// ListDevicesByTenant retrieves a paginated list of all devices belonging to a specific tenant.
+	// ListDevicesByTenant 检索属于特定租户的所有设备的分页列表。
 	ListDevicesByTenant(ctx context.Context, tenantID string, page, pageSize int) ([]*dto.DeviceResponse, int64, error)
 
-	// VerifyDeviceFingerprint verifies if device fingerprint matches
+	// VerifyDeviceFingerprint checks if a provided fingerprint matches the one stored for the device.
+	// VerifyDeviceFingerprint 检查提供的指纹是否与为设备存储的指纹匹配。
 	VerifyDeviceFingerprint(ctx context.Context, agentID, fingerprint string) (bool, error)
 }
 
-// deviceAppServiceImpl is the concrete implementation of DeviceAppService
+// deviceAppServiceImpl is the concrete implementation of the DeviceAppService interface.
+// deviceAppServiceImpl 是 DeviceAppService 接口的具体实现。
 type deviceAppServiceImpl struct {
 	deviceRepo    repository.DeviceRepository
 	auditService  domainService.AuditService
@@ -56,7 +68,8 @@ type deviceAppServiceImpl struct {
 	logger        logger.Logger
 }
 
-// NewDeviceAppService creates a new instance of DeviceAppService
+// NewDeviceAppService creates a new instance of DeviceAppService, injecting its dependencies.
+// NewDeviceAppService 创建一个新的 DeviceAppService 实例，并注入其依赖项。
 func NewDeviceAppService(
 	deviceRepo repository.DeviceRepository,
 	auditService domainService.AuditService,
@@ -77,14 +90,15 @@ func NewDeviceAppService(
 	}
 }
 
-// RegisterDevice implements device registration
+// RegisterDevice handles the logic for registering a new device.
+// It verifies the MGR assertion, checks for existing devices, evaluates trust level, saves the new device, and issues an initial token.
+// RegisterDevice 处理注册新设备的逻辑。
+// 它验证 MGR 断言，检查现有设备，评估信任级别，保存新设备，并颁发初始令牌。
 func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.DeviceResponse, error) {
-	// 1. Verify MGR Client Assertion
 	if err := s.verifyMgrClientAssertion(ctx, req.ClientAssertion, req.ClientID); err != nil {
 		return nil, err
 	}
 
-	// 2. Check if device already exists
 	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
 	if err != nil && !errors.IsNotFoundError(err) {
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to check device existence")
@@ -93,13 +107,11 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 		return nil, errors.New(errors.ErrCodeConflict, "device already exists", "")
 	}
 
-	// 3. Evaluate trust level
 	trustLevel, err := s.policyService.EvaluateTrustLevel(ctx, req.DeviceFingerprint)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to evaluate trust level")
 	}
 
-	// 4. Create device model
 	device := &models.Device{
 		DeviceID:          req.AgentID,
 		TenantID:          req.TenantID,
@@ -112,12 +124,10 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 		LastSeenAt:        time.Now(),
 	}
 
-	// 5. Save device to database
 	if err := s.deviceRepo.Save(ctx, device); err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create device")
 	}
 
-	// 6. Record audit log
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "device.register",
 		TenantID:  req.TenantID,
@@ -126,7 +136,6 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 		Details:   fmt.Sprintf("Device Type: %s, Trust Level: %s", req.DeviceType, device.TrustLevel),
 	})
 
-	// 7. Issue a refresh token
 	refreshToken, _, err := s.tokenService.IssueTokenPair(ctx, device.TenantID, device.DeviceID, device.DeviceFingerprint, []string{"device"}, map[string]interface{}{"trust_level": trustLevel})
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to issue refresh token")
@@ -135,7 +144,8 @@ func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.Regi
 	return s.deviceToResponse(device, refreshToken.JTI), nil
 }
 
-// GetDeviceInfo retrieves device information
+// GetDeviceInfo retrieves and returns the information for a specific device.
+// GetDeviceInfo 检索并返回特定设备的信息。
 func (s *deviceAppServiceImpl) GetDeviceInfo(ctx context.Context, agentID string) (*dto.DeviceResponse, error) {
 	if agentID == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "agent_id is required", "")
@@ -154,15 +164,14 @@ func (s *deviceAppServiceImpl) GetDeviceInfo(ctx context.Context, agentID string
 	return s.deviceToResponse(device), nil
 }
 
-// UpdateDeviceInfo updates device information
+// UpdateDeviceInfo updates the mutable properties of a device.
+// UpdateDeviceInfo 更新设备的可变属性。
 func (s *deviceAppServiceImpl) UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.UpdateDeviceRequest) (*dto.DeviceResponse, error) {
-	// Validate request
 	if err := utils.ValidateStruct(req); err != nil {
 		s.logger.Error(ctx, "Invalid update device request", err)
 		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid update device request")
 	}
 
-	// Get existing device
 	device, err := s.deviceRepo.FindByID(ctx, agentID)
 	if err != nil {
 		if errors.IsNotFoundError(err) {
@@ -173,42 +182,33 @@ func (s *deviceAppServiceImpl) UpdateDeviceInfo(ctx context.Context, agentID str
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to get device")
 	}
 
-	// Update fields if provided
 	if req.DeviceName != "" {
 		device.DeviceName = req.DeviceName
 	}
-	// if req.Metadata != nil {
-	// 	// device.Metadata = req.Metadata
-	// }
-
 	device.LastSeenAt = time.Now()
 
-	// Save updated device
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
 		s.logger.Error(ctx, "Failed to update device", err, logger.String("agent_id", agentID))
 		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to update device")
 	}
 
 	s.logger.Info(ctx, "Device updated successfully", logger.String("agent_id", agentID))
-
 	return s.deviceToResponse(device), nil
 }
 
-// UpdateDeviceTrustLevel updates device trust level
+// UpdateDeviceTrustLevel sets a new trust level for a device.
+// UpdateDeviceTrustLevel 为设备设置新的信任级别。
 func (s *deviceAppServiceImpl) UpdateDeviceTrustLevel(ctx context.Context, agentID string, trustLevel constants.TrustLevel) error {
 	if agentID == "" {
 		return errors.New(errors.CodeInvalidArgument, "agent_id is required")
 	}
 
-	// Validate trust level
 	switch trustLevel {
 	case constants.TrustLevelHigh, constants.TrustLevelMedium, constants.TrustLevelLow, constants.TrustLevelUntrusted:
-		// Valid trust level
 	default:
 		return errors.New(errors.CodeInvalidArgument, "invalid trust level")
 	}
 
-	// Get device
 	device, err := s.deviceRepo.FindByID(ctx, agentID)
 	if err != nil {
 		if errors.IsNotFoundError(err) {
@@ -221,7 +221,6 @@ func (s *deviceAppServiceImpl) UpdateDeviceTrustLevel(ctx context.Context, agent
 	oldTrustLevel := device.TrustLevel
 	device.TrustLevel = trustLevel
 
-	// Save updated device
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
 		s.logger.Error(ctx, "Failed to update device trust level", err, logger.String("agent_id", agentID))
 		return errors.Wrap(err, errors.CodeInternal, "failed to update device trust level")
@@ -232,17 +231,16 @@ func (s *deviceAppServiceImpl) UpdateDeviceTrustLevel(ctx context.Context, agent
 		logger.String("old_trust_level", string(oldTrustLevel)),
 		logger.String("new_trust_level", string(trustLevel)),
 	)
-
 	return nil
 }
 
-// DeactivateDevice deactivates a device
+// DeactivateDevice marks a device as inactive.
+// DeactivateDevice 将设备标记为非活动状态。
 func (s *deviceAppServiceImpl) DeactivateDevice(ctx context.Context, agentID string, reason string) error {
 	if agentID == "" {
 		return errors.New(errors.CodeInvalidArgument, "agent_id is required")
 	}
 
-	// Get device
 	device, err := s.deviceRepo.FindByID(ctx, agentID)
 	if err != nil {
 		if errors.IsNotFoundError(err) {
@@ -259,7 +257,6 @@ func (s *deviceAppServiceImpl) DeactivateDevice(ctx context.Context, agentID str
 
 	device.Status = constants.DeviceStatusInactive
 
-	// Save updated device
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
 		s.logger.Error(ctx, "Failed to deactivate device", err, logger.String("agent_id", agentID))
 		return errors.Wrap(err, errors.CodeInternal, "failed to deactivate device")
@@ -276,11 +273,11 @@ func (s *deviceAppServiceImpl) DeactivateDevice(ctx context.Context, agentID str
 		logger.String("agent_id", agentID),
 		logger.String("reason", reason),
 	)
-
 	return nil
 }
 
-// ListDevicesByTenant lists all devices for a tenant
+// ListDevicesByTenant retrieves a paginated list of devices for a given tenant.
+// ListDevicesByTenant 检索给定租户的设备分页列表。
 func (s *deviceAppServiceImpl) ListDevicesByTenant(ctx context.Context, tenantID string, page, pageSize int) ([]*dto.DeviceResponse, int64, error) {
 	if tenantID == "" {
 		return nil, 0, errors.New(errors.CodeInvalidArgument, "tenant_id is required")
@@ -307,7 +304,8 @@ func (s *deviceAppServiceImpl) ListDevicesByTenant(ctx context.Context, tenantID
 	return responses, total, nil
 }
 
-// VerifyDeviceFingerprint verifies if device fingerprint matches
+// VerifyDeviceFingerprint compares a provided fingerprint with the one stored for the device.
+// VerifyDeviceFingerprint 将提供的指纹与为设备存储的指纹进行比较。
 func (s *deviceAppServiceImpl) VerifyDeviceFingerprint(ctx context.Context, agentID, fingerprint string) (bool, error) {
 	if agentID == "" || fingerprint == "" {
 		return false, errors.New(errors.CodeInvalidArgument, "agent_id and fingerprint are required")
@@ -323,7 +321,6 @@ func (s *deviceAppServiceImpl) VerifyDeviceFingerprint(ctx context.Context, agen
 	}
 
 	matches := device.DeviceFingerprint == fingerprint
-
 	if !matches {
 		s.logger.Warn(ctx, "Device fingerprint mismatch",
 			logger.String("agent_id", agentID),
@@ -331,7 +328,6 @@ func (s *deviceAppServiceImpl) VerifyDeviceFingerprint(ctx context.Context, agen
 			logger.String("provided", fingerprint),
 		)
 	}
-
 	return matches, nil
 }
 

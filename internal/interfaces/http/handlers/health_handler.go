@@ -12,14 +12,16 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// HealthHandler 健康检查处理器
+// HealthHandler provides HTTP handlers for Kubernetes liveness and readiness probes.
+// HealthHandler 为 Kubernetes 的活性和就绪性探针提供 HTTP 处理器。
 type HealthHandler struct {
 	dbConn    *postgres.DBConnection
 	redisConn redis.RedisConnectionManager
 	logger    logger.Logger
 }
 
-// NewHealthHandler 创建健康检查处理器
+// NewHealthHandler creates a new HealthHandler with dependencies for checking the health of external services.
+// NewHealthHandler 使用用于检查外部服务健康状况的依赖项创建一个新的 HealthHandler。
 func NewHealthHandler(
 	dbConn *postgres.DBConnection,
 	redisConn redis.RedisConnectionManager,
@@ -32,15 +34,21 @@ func NewHealthHandler(
 	}
 }
 
-// HealthResponse 健康检查响应
+// HealthResponse defines the structure of the JSON response for health checks.
+// HealthResponse 定义了健康检查的 JSON 响应的结构。
 type HealthResponse struct {
 	Status    string            `json:"status"`
 	Timestamp time.Time         `json:"timestamp"`
-	Checks    map[string]string `json:"checks"`
+	Checks    map[string]string `json:"checks,omitempty"`
 }
 
-// ReadinessCheck 就绪检查端点
+// ReadinessCheck is the handler for the readiness probe (e.g., /ready).
+// It performs a deep check of all critical dependencies like the database and Redis.
+// The service is considered "ready" only if all dependencies are healthy.
 // GET /ready
+// ReadinessCheck 是就绪性探针的处理程序（例如 /ready）。
+// 它对所有关键依赖项（如数据库和 Redis）执行深度检查。
+// 只有当所有依赖项都健康时，该服务才被视为“就绪”。
 func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
@@ -48,7 +56,7 @@ func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
 	checks := make(map[string]string)
 	allReady := true
 
-	// 检查所有依赖是否可用
+	// Check all critical dependencies.
 	if err := h.checkDatabase(ctx); err != nil {
 		checks["database"] = "not ready"
 		allReady = false
@@ -79,37 +87,38 @@ func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
 	c.JSON(httpStatus, response)
 }
 
-// LivenessCheck 存活检查端点
+// LivenessCheck is the handler for the liveness probe (e.g., /live).
+// This is a shallow check that simply confirms the HTTP server is running and responsive.
 // GET /live
+// LivenessCheck 是活性探针的处理程序（例如 /live）。
+// 这是一个浅层检查，仅确认 HTTP 服务器正在运行并响应。
 func (h *HealthHandler) LivenessCheck(c *gin.Context) {
-	// 简单的存活检查，只要服务能响应就表示存活
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "alive",
-		"timestamp": time.Now().UTC(),
+	c.JSON(http.StatusOK, HealthResponse{
+		Status:    "alive",
+		Timestamp: time.Now().UTC(),
 	})
 }
 
-// checkDatabase 检查数据库连接
+// checkDatabase performs a health check on the database connection.
+// checkDatabase 对数据库连接执行健康检查。
 func (h *HealthHandler) checkDatabase(ctx context.Context) error {
 	if h.dbConn == nil {
 		return fmt.Errorf("database connection is nil")
 	}
-
 	return h.dbConn.Ping(ctx)
 }
 
-// checkRedis 检查 Redis 连接
+// checkRedis performs a health check on the Redis connection.
+// checkRedis 对 Redis 连接执行健康检查。
 func (h *HealthHandler) checkRedis(ctx context.Context) error {
+	if h.redisConn == nil {
+		return fmt.Errorf("redis connection manager is nil")
+	}
 	client := h.redisConn.GetClient()
 	if client == nil {
 		return fmt.Errorf("redis client is nil")
 	}
 
-	// 执行 PING 命令验证连接
-	_, err := client.Ping(ctx).Result()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// Execute a PING command to verify the connection.
+	return client.Ping(ctx).Err()
 }

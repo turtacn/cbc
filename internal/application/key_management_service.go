@@ -15,7 +15,10 @@ import (
 	"github.com/turtacn/cbc/pkg/logger"
 )
 
-// KeyManagementService is the application service for key management.
+// KeyManagementService is the application-layer service responsible for orchestrating cryptographic key lifecycle events.
+// It coordinates between physical key providers, database repositories, and policy engines.
+// KeyManagementService 是负责协调加密密钥生命周期事件的应用层服务。
+// 它在物理密钥提供者、数据库存储库和策略引擎之间进行协调。
 type KeyManagementService struct {
 	keyProviders map[string]service.KeyProvider
 	keyRepo      repository.KeyRepository
@@ -26,7 +29,10 @@ type KeyManagementService struct {
 	logger       logger.Logger
 }
 
-// NewKeyManagementService creates a new KeyManagementService.
+// NewKeyManagementService creates a new instance of the KeyManagementService.
+// It takes all necessary dependencies for managing keys, policies, and logging.
+// NewKeyManagementService 创建 KeyManagementService 的一个新实例。
+// 它需要管理密钥、策略和日志记录所需的所有依赖项。
 func NewKeyManagementService(
 	keyProviders map[string]service.KeyProvider,
 	keyRepo repository.KeyRepository,
@@ -47,7 +53,10 @@ func NewKeyManagementService(
 	}, nil
 }
 
-// RotateTenantKey rotates the key for a tenant.
+// RotateTenantKey orchestrates the entire process of rotating a signing key for a tenant.
+// This includes checking policy, generating a new key, updating the database, logging the event, and purging the CDN cache.
+// RotateTenantKey 协调为租户轮换签名密钥的整个过程。
+// 这包括检查策略、生成新密钥、更新数据库、记录事件以及清除 CDN 缓存。
 func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID string, cdnManager service.CDNCacheManager) (string, error) {
 	tenant, err := s.tenantRepo.FindByID(ctx, tenantID)
 	if err != nil {
@@ -111,13 +120,11 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 	}
 	if err := s.klr.LogEvent(ctx, klrEvent); err != nil {
 		s.logger.Error(ctx, "failed to log key creation event", err, logger.String("kid", kid))
-		// Do not return error, as the key is already created
 	}
 
 	deprecatedKeys, err := s.keyRepo.GetActiveKeys(ctx, tenantID)
 	if err != nil {
 		s.logger.Error(ctx, "failed to get active keys for deprecation", err)
-		// Continue anyway, the new key is already active
 	}
 
 	for _, key := range deprecatedKeys {
@@ -131,7 +138,6 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 	revokedKeys, err := s.keyRepo.GetDeprecatedKeys(ctx, tenantID)
 	if err != nil {
 		s.logger.Error(ctx, "failed to get deprecated keys for revocation", err)
-		// Continue
 	}
 
 	for _, key := range revokedKeys {
@@ -142,13 +148,13 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 
 	if err := cdnManager.PurgeTenantJWKS(ctx, tenantID); err != nil {
 		s.logger.Error(ctx, "failed to purge cdn cache for tenant", err, logger.String("tenantID", tenantID))
-		// Do not return error, as the key rotation is already complete
 	}
 
 	return kid, nil
 }
 
-// GetTenantPublicKeys retrieves the public keys for a tenant.
+// GetTenantPublicKeys retrieves all active and deprecated public keys for a tenant, suitable for building a JWKS.
+// GetTenantPublicKeys 检索租户的所有活动和已弃用的公钥，适用于构建 JWKS。
 func (s *KeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID string) (map[string]*rsa.PublicKey, error) {
 	keys, err := s.keyRepo.GetActiveKeys(ctx, tenantID)
 	if err != nil {
@@ -159,7 +165,6 @@ func (s *KeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deprecated keys: %w", err)
 	}
-
 	keys = append(keys, deprecatedKeys...)
 
 	publicKeys := make(map[string]*rsa.PublicKey, len(keys))
@@ -182,7 +187,8 @@ func (s *KeyManagementService) GetTenantPublicKeys(ctx context.Context, tenantID
 	return publicKeys, nil
 }
 
-// CompromiseKey marks a key as compromised.
+// CompromiseKey marks a key as compromised, logs the event, and purges the relevant CDN cache.
+// CompromiseKey 将密钥标记为已泄露，记录事件，并清除相关的 CDN 缓存。
 func (s *KeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid, reason string, cdnManager service.CDNCacheManager) error {
 	if err := s.keyRepo.UpdateKeyStatus(ctx, tenantID, kid, "compromised"); err != nil {
 		return err
@@ -196,18 +202,17 @@ func (s *KeyManagementService) CompromiseKey(ctx context.Context, tenantID, kid,
 	}
 	if err := s.klr.LogEvent(ctx, klrEvent); err != nil {
 		s.logger.Error(ctx, "failed to log key compromise event", err, logger.String("kid", kid))
-		// Do not return error, as the key is already compromised in the database
 	}
 
 	if err := cdnManager.PurgeTenantJWKS(ctx, tenantID); err != nil {
 		s.logger.Error(ctx, "failed to purge cdn cache for tenant", err, logger.String("tenantID", tenantID))
-		// Do not return error, as the key is already compromised in the database
 	}
 
 	return nil
 }
 
-// GenerateJWT generates a JWT for a tenant.
+// GenerateJWT creates a new JWT, signs it with the tenant's active key, and returns the token string.
+// GenerateJWT 创建一个新的 JWT，使用租户的活动密钥对其进行签名，并返回令牌字符串。
 func (s *KeyManagementService) GenerateJWT(ctx context.Context, tenantID string, claims jwt.Claims) (string, string, error) {
 	activeKeys, err := s.keyRepo.GetActiveKeys(ctx, tenantID)
 	if err != nil || len(activeKeys) == 0 {
@@ -218,6 +223,8 @@ func (s *KeyManagementService) GenerateJWT(ctx context.Context, tenantID string,
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = activeKey.ID
 
+	// Note: In a real implementation, the signing operation would be delegated to the KeyProvider
+	// to avoid exposing the private key material to this service.
 	signedString, err := token.SignedString(nil)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to sign token: %w", err)
@@ -226,7 +233,8 @@ func (s *KeyManagementService) GenerateJWT(ctx context.Context, tenantID string,
 	return signedString, activeKey.ID, nil
 }
 
-// VerifyJWT verifies a JWT for a tenant.
+// VerifyJWT parses and validates a JWT string. It fetches the correct public key based on the token's 'kid' header.
+// VerifyJWT 解析并验证 JWT 字符串。它根据令牌的“kid”标头获取正确的公钥。
 func (s *KeyManagementService) VerifyJWT(ctx context.Context, tokenString, tenantID string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {

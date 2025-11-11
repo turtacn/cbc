@@ -15,8 +15,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// DBConnection manages PostgreSQL database connection pool lifecycle.
-// It provides thread-safe connection pool with automatic health monitoring.
+// DBConnection manages the lifecycle of the PostgreSQL database connection pool.
+// It provides a thread-safe connection pool with automatic health monitoring and integrates both `pgxpool` for performance and `gorm` for ORM capabilities.
+// DBConnection 管理 PostgreSQL 数据库连接池的生命周期。
+// 它提供了一个线程安全的连接池，具有自动健康监控功能，并集成了用于性能的 `pgxpool` 和用于 ORM 功能的 `gorm`。
 type DBConnection struct {
 	pool   *pgxpool.Pool
 	gormDB *gorm.DB
@@ -24,17 +26,20 @@ type DBConnection struct {
 	logger logger.Logger
 }
 
-// NewDBConnection creates a new PostgreSQL connection manager instance.
-// It initializes connection pool with configuration parameters and performs initial health check.
+// NewDBConnection creates and initializes a new PostgreSQL connection manager.
+// It sets up the connection pool based on the provided configuration, establishes the connection,
+// and performs an initial health check to ensure the database is reachable.
+// NewDBConnection 创建并初始化一个新的 PostgreSQL 连接管理器。
+// 它根据提供的配置设置连接池，建立连接，并执行初始健康检查以确保数据库是可达的。
 //
 // Parameters:
-//   - ctx: Context for connection timeout control
-//   - cfg: Database configuration including host, port, credentials, and pool settings
-//   - log: Logger instance for connection lifecycle events
+//   - ctx: A context.Context for controlling timeouts during the initial connection.
+//   - cfg: The database configuration, including credentials, host, and pool settings.
+//   - log: A logger instance for recording connection lifecycle events.
 //
 // Returns:
-//   - *DBConnection: Initialized connection manager
-//   - error: Connection establishment error if any
+//   - *DBConnection: A pointer to the initialized DBConnection manager.
+//   - error: An error if the connection cannot be established or the initial ping fails.
 func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger.Logger) (*DBConnection, error) {
 	if cfg == nil {
 		return nil, errors.New(errors.CodeInvalidArgument, "database config is required")
@@ -113,28 +118,38 @@ func NewDBConnection(ctx context.Context, cfg *config.DatabaseConfig, log logger
 	return dbConn, nil
 }
 
-// Pool returns the underlying pgxpool.Pool for executing database operations.
-// This method is primarily used by repository implementations.
+// Pool returns the underlying `pgxpool.Pool` for executing efficient, low-level database operations.
+// This is the preferred method for repositories that need high performance.
+// Pool 返回底层的 `pgxpool.Pool`，用于执行高效的、低级别的数据库操作。
+// 这是需要高性能的仓库的首选方法。
 //
 // Returns:
-//   - *pgxpool.Pool: Active connection pool instance
+//   - *pgxpool.Pool: The active connection pool instance.
 func (db *DBConnection) Pool() *pgxpool.Pool {
 	return db.pool
 }
 
-// DB returns the underlying gorm.DB for executing database operations.
+// DB returns the underlying `gorm.DB` instance for ORM-based database operations.
+// This is useful for complex queries or when leveraging GORM's features.
+// DB 返回底层的 `gorm.DB` 实例，用于基于 ORM 的数据库操作。
+// 这对于复杂的查询或利用 GORM 的功能很有用。
+//
+// Returns:
+//   - *gorm.DB: The active GORM database handle.
 func (db *DBConnection) DB() *gorm.DB {
 	return db.gormDB
 }
 
-// Ping verifies database connectivity and responsiveness.
-// It executes a simple query to ensure the connection is alive.
+// Ping verifies the connectivity and responsiveness of the database.
+// It executes a simple query and also checks for high latency, logging a warning if it exceeds a threshold.
+// Ping 验证数据库的连接性和响应能力。
+// 它执行一个简单的查询，并检查高延迟，如果超过阈值则记录警告。
 //
 // Parameters:
-//   - ctx: Context for timeout control (recommended: 5-10 seconds)
+//   - ctx: A context.Context for controlling the timeout of the ping operation.
 //
 // Returns:
-//   - error: Connection error if database is unreachable or unresponsive
+//   - error: An error if the database is unreachable or unresponsive.
 func (db *DBConnection) Ping(ctx context.Context) error {
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -159,15 +174,19 @@ func (db *DBConnection) Ping(ctx context.Context) error {
 	return nil
 }
 
-// HealthCheck performs comprehensive health check including connection stats.
-// It returns detailed information about connection pool status.
+// HealthCheck performs a comprehensive health check of the database connection pool.
+// It returns detailed statistics about the pool's state, such as total, idle, and acquired connections.
+// It also includes a warning if the pool is nearing its configured limit.
+// HealthCheck 对数据库连接池执行全面的健康检查。
+// 它返回有关池状态的详细统计信息，例如总连接数、空闲连接数和已获取的连接数。
+// 如果池接近其配置的限制，它还会包含一个警告。
 //
 // Parameters:
-//   - ctx: Context for timeout control
+//   - ctx: A context.Context for controlling the timeout of the health check.
 //
 // Returns:
-//   - map[string]interface{}: Health metrics including pool statistics
-//   - error: Health check error if any
+//   - map[string]interface{}: A map containing health metrics and pool statistics.
+//   - error: An error if the underlying ping check fails.
 func (db *DBConnection) HealthCheck(ctx context.Context) (map[string]interface{}, error) {
 	if err := db.Ping(ctx); err != nil {
 		return nil, err
@@ -199,9 +218,10 @@ func (db *DBConnection) HealthCheck(ctx context.Context) (map[string]interface{}
 	return healthInfo, nil
 }
 
-// Close gracefully shuts down the connection pool.
-// It waits for active connections to complete before closing.
-// This method should be called during application shutdown.
+// Close gracefully shuts down the database connection pool.
+// It should be called during application termination to ensure all connections are properly closed.
+// Close 优雅地关闭数据库连接池。
+// 应在应用程序终止期间调用此方法，以确保所有连接都已正确关闭。
 func (db *DBConnection) Close() {
 	db.logger.Info(context.Background(), "Closing PostgreSQL connection pool",
 		logger.Int("total_conns", int(db.pool.Stat().TotalConns())),
@@ -213,23 +233,25 @@ func (db *DBConnection) Close() {
 	db.logger.Info(context.Background(), "PostgreSQL connection pool closed successfully")
 }
 
-// Stats returns current connection pool statistics.
-// Useful for monitoring and alerting.
+// Stats returns a snapshot of the current connection pool statistics.
+// This is useful for monitoring, alerting, and debugging connection pool behavior.
+// Stats 返回当前连接池统计信息的快照。
+// 这对于监控、警报和调试连接池行为非常有用。
 //
 // Returns:
-//   - *pgxpool.Stat: Pool statistics snapshot
+//   - *pgxpool.Stat: A snapshot of the pool's statistics.
 func (db *DBConnection) Stats() *pgxpool.Stat {
 	stats := db.pool.Stat()
 	return stats
 }
 
-// Config returns the database configuration.
-// This is useful for debugging and validation purposes.
+// Config returns the database configuration that the connection is currently using.
+// This is useful for debugging and runtime validation.
+// Config 返回连接当前正在使用的数据库配置。
+// 这对于调试和运行时验证非常有用。
 //
 // Returns:
-//   - *config.DatabaseConfig: Current database configuration
+//   - *config.DatabaseConfig: The current database configuration.
 func (db *DBConnection) Config() *config.DatabaseConfig {
 	return db.config
 }
-
-//Personal.AI order the ending
