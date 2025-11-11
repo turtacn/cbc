@@ -52,7 +52,7 @@ graph TB
     end
 
     subgraph "Infrastructure Layer (External Systems)"
-        Postgres[PostgreSQL (GORM/PGX)]
+        Postgres[PostgreSQL（GORM/PGX）]
         Redis[Redis]
         Vault[HashiCorp Vault]
         Kafka[Apache Kafka]
