@@ -32,21 +32,6 @@ type TokenRevokeRequest struct {
 	Reason        string `json:"reason" validate:"omitempty,max=256"`
 }
 
-// DeviceRegisterRequest 设备注册请求 DTO（用于 MGR 代理注册）
-type DeviceRegisterRequest struct {
-	ClientID           string `json:"client_id" validate:"required,min=1,max=128"`
-	ClientAssertionType string `json:"client_assertion_type" validate:"required,eq=urn:ietf:params:oauth:client-assertion-type:jwt-bearer"`
-	ClientAssertion    string `json:"client_assertion" validate:"required,min=1"`
-	GrantType          string `json:"grant_type" validate:"required,eq=client_credentials"`
-	TenantID           string `json:"tenant_id" validate:"required,min=1,max=64"`
-	AgentID            string `json:"agent_id" validate:"required,min=1,max=128"`
-	DeviceFingerprint  string `json:"device_fingerprint" validate:"omitempty,min=1,max=128"`
-	DeviceName         string `json:"device_name" validate:"omitempty,max=256"`
-	DeviceType         string `json:"device_type" validate:"omitempty,max=64"`
-	IPAddress          string `json:"ip_address" validate:"omitempty,ip"`
-	UserAgent          string `json:"user_agent" validate:"omitempty,max=512"`
-}
-
 // TokenResponse 令牌响应 DTO（单个令牌）
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`

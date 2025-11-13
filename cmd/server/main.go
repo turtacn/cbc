@@ -376,7 +376,7 @@ func (app *Application) initApplicationServices() error {
 
 	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
 	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.kms, &app.config.OAuth)
-	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.config, app.logger)
+	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.blacklistStore, app.config, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.kms, app.cdnManager, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")
 	return nil

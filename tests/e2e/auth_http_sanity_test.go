@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
@@ -21,6 +23,16 @@ import (
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
 )
+
+func generateTestJWT(t *testing.T, claims jwt.MapClaims, privateKey interface{}) string {
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = "test-kid"
+	signedString, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("Failed to sign token: %v", err)
+	}
+	return signedString
+}
 
 func TestAuthHttpSanity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -46,7 +58,6 @@ func TestAuthHttpSanity(t *testing.T) {
 	healthHandler := handlers.NewHealthHandler(nil, mockRedis, log)
 	oauthHandler := handlers.NewOAuthHandler(mockDeviceAuthApp)
 
-
 	// Setup router
 	router := httpRouter.NewRouter(cfg, log, healthHandler, authHandler, deviceHandler, jwksHandler, oauthHandler, nil, nil, nil, nil)
 	router.SetupRoutes()
@@ -54,9 +65,28 @@ func TestAuthHttpSanity(t *testing.T) {
 
 	// 1. POST /api/v1/devices -> 201
 	t.Run("RegisterDevice", func(t *testing.T) {
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		claims := jwt.MapClaims{
+			"iss": "test-client-id",
+			"sub": "test-client-id",
+			"aud": "http://localhost:8080",
+			"exp": time.Now().Add(time.Hour * 1).Unix(),
+			"jti": "e2e-unique-jti",
+		}
+		assertion := generateTestJWT(t, claims, privateKey)
+
 		mockDeviceApp.On("RegisterDevice", mock.Anything, mock.AnythingOfType("*dto.DeviceRegisterRequest")).Return(&dto.DeviceResponse{DeviceID: "dev-123"}, nil)
-		reqBody := `{"tenant_id": "t-1", "agent_id": "agent-1", "device_fingerprint": "fp-1", "device_name": "test-device", "device_type": "desktop"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/devices", bytes.NewBufferString(reqBody))
+		reqBody := &dto.DeviceRegisterRequest{
+			GrantType:           "client_credentials",
+			ClientID:            "test-client-id",
+			ClientAssertionType: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+			ClientAssertion:     assertion,
+			TenantID:            "t-1",
+			AgentID:             "agent-1",
+			DeviceFingerprint:   "fp-1",
+		}
+		bodyBytes, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/devices", bytes.NewBuffer(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		engine.ServeHTTP(w, req)

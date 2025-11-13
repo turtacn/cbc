@@ -29,7 +29,7 @@ import (
 type DeviceAppService interface {
 	// RegisterDevice registers a new device in the system after verifying the MGR client assertion.
 	// RegisterDevice 在验证 MGR 客户端断言后在系统中注册一个新设备。
-	RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.DeviceResponse, error)
+	RegisterDevice(ctx context.Context, req *dto.DeviceRegisterRequest) (*dto.DeviceResponse, error)
 
 	// GetDeviceInfo retrieves detailed information for a specific device by its agent ID.
 	// GetDeviceInfo 通过其代理 ID 检索特定设备的详细信息。
@@ -37,7 +37,7 @@ type DeviceAppService interface {
 
 	// UpdateDeviceInfo updates mutable information for an existing device.
 	// UpdateDeviceInfo 更新现有设备的可变信息。
-	UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.UpdateDeviceRequest) (*dto.DeviceResponse, error)
+	UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.DeviceUpdateRequest) (*dto.DeviceResponse, error)
 
 	// UpdateDeviceTrustLevel manually sets the trust level for a device.
 	// UpdateDeviceTrustLevel 手动设置设备的信任级别。
@@ -64,6 +64,7 @@ type deviceAppServiceImpl struct {
 	mgrKeyFetcher domainService.MgrKeyFetcher
 	policyService domainService.PolicyService
 	tokenService  domainService.TokenService
+	blacklist     domainService.TokenBlacklistStore
 	cfg           *config.Config
 	logger        logger.Logger
 }
@@ -76,6 +77,7 @@ func NewDeviceAppService(
 	mgrKeyFetcher domainService.MgrKeyFetcher,
 	policyService domainService.PolicyService,
 	tokenService domainService.TokenService,
+	blacklist domainService.TokenBlacklistStore,
 	cfg *config.Config,
 	log logger.Logger,
 ) DeviceAppService {
@@ -85,6 +87,7 @@ func NewDeviceAppService(
 		mgrKeyFetcher: mgrKeyFetcher,
 		policyService: policyService,
 		tokenService:  tokenService,
+		blacklist:     blacklist,
 		cfg:           cfg,
 		logger:        log,
 	}
@@ -94,7 +97,7 @@ func NewDeviceAppService(
 // It verifies the MGR assertion, checks for existing devices, evaluates trust level, saves the new device, and issues an initial token.
 // RegisterDevice 处理注册新设备的逻辑。
 // 它验证 MGR 断言，检查现有设备，评估信任级别，保存新设备，并颁发初始令牌。
-func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.DeviceResponse, error) {
+func (s *deviceAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.DeviceRegisterRequest) (*dto.DeviceResponse, error) {
 	if err := s.verifyMgrClientAssertion(ctx, req.ClientAssertion, req.ClientID); err != nil {
 		return nil, err
 	}
@@ -166,7 +169,7 @@ func (s *deviceAppServiceImpl) GetDeviceInfo(ctx context.Context, agentID string
 
 // UpdateDeviceInfo updates the mutable properties of a device.
 // UpdateDeviceInfo 更新设备的可变属性。
-func (s *deviceAppServiceImpl) UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.UpdateDeviceRequest) (*dto.DeviceResponse, error) {
+func (s *deviceAppServiceImpl) UpdateDeviceInfo(ctx context.Context, agentID string, req *dto.DeviceUpdateRequest) (*dto.DeviceResponse, error) {
 	if err := utils.ValidateStruct(req); err != nil {
 		s.logger.Error(ctx, "Invalid update device request", err)
 		return nil, errors.Wrap(err, errors.ErrCodeInvalidRequest, "invalid update device request")
@@ -332,7 +335,7 @@ func (s *deviceAppServiceImpl) VerifyDeviceFingerprint(ctx context.Context, agen
 }
 
 // generateDeviceFingerprint generates a device fingerprint hash
-func (s *deviceAppServiceImpl) generateDeviceFingerprint(req *dto.RegisterDeviceRequest) string {
+func (s *deviceAppServiceImpl) generateDeviceFingerprint(req *dto.DeviceRegisterRequest) string {
 	data := fmt.Sprintf("%s:%s",
 		req.AgentID,
 		req.DeviceType,
@@ -343,7 +346,7 @@ func (s *deviceAppServiceImpl) generateDeviceFingerprint(req *dto.RegisterDevice
 }
 
 // calculateInitialTrustLevel calculates initial trust level based on device information
-func (s *deviceAppServiceImpl) calculateInitialTrustLevel(req *dto.RegisterDeviceRequest) constants.TrustLevel {
+func (s *deviceAppServiceImpl) calculateInitialTrustLevel(req *dto.DeviceRegisterRequest) constants.TrustLevel {
 	// Default trust level is medium
 	trustLevel := constants.TrustLevelMedium
 
@@ -376,42 +379,70 @@ func (s *deviceAppServiceImpl) deviceToResponse(device *models.Device, refreshTo
 }
 
 func (s *deviceAppServiceImpl) verifyMgrClientAssertion(ctx context.Context, assertion, clientID string) error {
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}))
-	token, err := parser.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
-		kid, ok := token.Header["kid"].(string)
-		if !ok {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, "missing kid in token header", "")
-		}
-		return s.mgrKeyFetcher.GetMgrPublicKey(ctx, clientID, kid)
-	})
-
+	// 1. Unverified Parse to get kid
+	token, _, err := new(jwt.Parser).ParseUnverified(assertion, jwt.MapClaims{})
 	if err != nil {
-		return errors.Wrap(err, errors.ErrCodeUnauthorized, "invalid client assertion")
+		return errors.ErrInvalidGrant("failed to parse client assertion")
 	}
-
-	if !token.Valid {
-		return errors.New(errors.ErrCodeUnauthorized, "client assertion is not valid", "")
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
+	kid, ok := token.Header["kid"].(string)
 	if !ok {
-		return errors.New(errors.ErrCodeUnauthorized, "invalid claims format", "")
+		return errors.ErrInvalidGrant("missing 'kid' in client assertion header")
 	}
 
-	if sub, err := claims.GetSubject(); err != nil || sub != clientID {
-		return errors.New(errors.ErrCodeUnauthorized, "invalid subject in client assertion", "")
+	// 2. Fetch MGR Public Key
+	publicKey, err := s.mgrKeyFetcher.GetMgrPublicKey(ctx, clientID, kid)
+	if err != nil {
+		return errors.ErrInvalidGrant("failed to fetch MGR public key")
 	}
 
+	// 3. Verified Parse
+	parsedToken, err := jwt.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return publicKey, nil
+	})
+	if err != nil {
+		return errors.ErrInvalidGrant("client assertion validation failed")
+	}
+
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok || !parsedToken.Valid {
+		return errors.ErrInvalidGrant("invalid client assertion claims")
+	}
+
+	// 4. Validate Claims (iss, aud, exp)
 	if iss, err := claims.GetIssuer(); err != nil || iss != clientID {
-		return errors.New(errors.ErrCodeUnauthorized, "invalid issuer in client assertion", "")
+		return errors.ErrInvalidGrant("invalid 'iss' in client assertion")
 	}
 
 	if aud, err := claims.GetAudience(); err != nil || !s.isValidAudience(aud) {
-		return errors.New(errors.ErrCodeUnauthorized, "invalid audience in client assertion", "")
+		return errors.ErrInvalidGrant("invalid 'aud' in client assertion")
 	}
 
 	if exp, err := claims.GetExpirationTime(); err != nil || exp.Time.Before(time.Now()) {
-		return errors.New(errors.ErrCodeUnauthorized, "client assertion has expired", "")
+		return errors.ErrInvalidGrant("client assertion has expired")
+	}
+
+	// 5. Prevent Replay Attacks with JTI
+	jti, ok := claims["jti"].(string)
+	if !ok || jti == "" {
+		return errors.ErrInvalidGrant("missing 'jti' in client assertion")
+	}
+
+	// The tenantID for the blacklist should be the one from the request.
+	tenantID, _ := claims["tenant_id"].(string)
+	isRevoked, err := s.blacklist.IsRevoked(ctx, tenantID, jti)
+	if err != nil {
+		return errors.ErrServerError("failed to check JTI replay")
+	}
+	if isRevoked {
+		return errors.ErrInvalidGrant("JTI has been replayed")
+	}
+	exp, _ := claims.GetExpirationTime()
+	if err := s.blacklist.Revoke(ctx, tenantID, jti, exp.Time); err != nil {
+		s.logger.Error(ctx, "failed to store JTI for replay prevention", err, logger.String("jti", jti))
+		// Continue even if storing JTI fails, as the assertion is otherwise valid.
 	}
 
 	return nil
@@ -425,4 +456,3 @@ func (s *deviceAppServiceImpl) isValidAudience(aud jwt.ClaimStrings) bool {
 	}
 	return false
 }
-

@@ -4,6 +4,21 @@ import (
 	"time"
 )
 
+// DeviceRegisterRequest contains the required parameters for device registration via MGR assertion.
+type DeviceRegisterRequest struct {
+	GrantType           string `json:"grant_type" form:"grant_type" binding:"required"`
+	ClientID            string `json:"client_id" form:"client_id" binding:"required"`
+	ClientAssertionType string `json:"client_assertion_type" form:"client_assertion_type" binding:"required,eq=urn:ietf:params:oauth:client-assertion-type:jwt-bearer"`
+	ClientAssertion     string `json:"client_assertion" form:"client_assertion" binding:"required"`
+	TenantID            string `json:"tenant_id" form:"tenant_id" binding:"required"`
+	AgentID             string `json:"agent_id" form:"agent_id" binding:"required"`
+	DeviceFingerprint   string `json:"device_fingerprint" form:"device_fingerprint" binding:"required"`
+	DeviceName          string `json:"device_name" form:"device_name"`
+	DeviceType          string `json:"device_type" form:"device_type"`
+	IPAddress           string `json:"ip_address" form:"ip_address"`
+	UserAgent           string `json:"user_agent" form:"user_agent"`
+}
+
 // DeviceRegisterRequestV2 设备注册请求 DTO（用于直接设备注册场景）
 type DeviceRegisterRequestV2 struct {
 	TenantID          string            `json:"tenant_id" validate:"required,min=1,max=64"`

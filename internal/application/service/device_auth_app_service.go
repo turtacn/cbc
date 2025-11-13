@@ -170,7 +170,6 @@ func (s *deviceAuthAppServiceImpl) PollDeviceToken(ctx context.Context, deviceCo
 			ExpiresIn:    int64(accessToken.TimeUntilExpiry().Seconds()),
 			TokenType:    "Bearer",
 			Scope:        session.Scope,
-			IssuedAt:     accessToken.IssuedAt.Unix(),
 		}, nil
 	default:
 		return nil, errors.ErrServerError("unknown device auth session status")

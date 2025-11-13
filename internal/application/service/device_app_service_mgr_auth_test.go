@@ -86,6 +86,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 		"sub": clientID,
 		"exp": time.Now().Add(1 * time.Hour).Unix(),
 		"aud": "http://localhost:8080",
+		"jti": "some-jti",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = kid
@@ -103,14 +104,16 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 	testCases := []struct {
 		name          string
 		assertion     string
-		setupMocks    func(*mockMgrKeyFetcher, *mockDeviceRepository, *mockPolicyService)
+		setupMocks    func(*mockMgrKeyFetcher, *mockDeviceRepository, *mockPolicyService, *mocks.TokenBlacklistStore)
 		expectedError bool
 	}{
 		{
 			name:      "Valid assertion",
 			assertion: validAssertion,
-			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService) {
+			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService, blacklist *mocks.TokenBlacklistStore) {
 				keyFetcher.On("GetMgrPublicKey", mock.Anything, clientID, kid).Return(&privKey.PublicKey, nil)
+				blacklist.On("IsRevoked", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
+				blacklist.On("Revoke", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				deviceRepo.On("FindByID", mock.Anything, mock.Anything).Return(nil, errors.New(errors.ErrCodeNotFound, "", ""))
 				policyService.On("EvaluateTrustLevel", mock.Anything, mock.Anything).Return("medium", nil)
 				deviceRepo.On("Save", mock.Anything, mock.Anything).Return(nil)
@@ -120,7 +123,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 		{
 			name:      "Invalid signature",
 			assertion: invalidAssertion,
-			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService) {
+			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService, blacklist *mocks.TokenBlacklistStore) {
 				keyFetcher.On("GetMgrPublicKey", mock.Anything, clientID, kid).Return(&privKey.PublicKey, nil)
 			},
 			expectedError: true,
@@ -138,7 +141,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 				assertion, _ := token.SignedString(privKey)
 				return assertion
 			}(),
-			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService) {
+			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService, blacklist *mocks.TokenBlacklistStore) {
 				keyFetcher.On("GetMgrPublicKey", mock.Anything, clientID, kid).Return(&privKey.PublicKey, nil)
 			},
 			expectedError: true,
@@ -157,7 +160,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 				assertion, _ := token.SignedString(privKey)
 				return assertion
 			}(),
-			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService) {
+			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService, blacklist *mocks.TokenBlacklistStore) {
 				keyFetcher.On("GetMgrPublicKey", mock.Anything, clientID, kid).Return(&privKey.PublicKey, nil)
 			},
 			expectedError: true,
@@ -176,7 +179,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 				assertion, _ := token.SignedString(privKey)
 				return assertion
 			}(),
-			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService) {
+			setupMocks: func(keyFetcher *mockMgrKeyFetcher, deviceRepo *mockDeviceRepository, policyService *mockPolicyService, blacklist *mocks.TokenBlacklistStore) {
 				keyFetcher.On("GetMgrPublicKey", mock.Anything, clientID, kid).Return(&privKey.PublicKey, nil)
 			},
 			expectedError: true,
@@ -188,17 +191,18 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 			keyFetcher := new(mockMgrKeyFetcher)
 			deviceRepo := new(mockDeviceRepository)
 			policyService := new(mockPolicyService)
-			auditService := new(mocks.MockAuditService)
+			auditService := new(mocks.AuditService)
 			auditService.On("LogEvent", mock.Anything, mock.Anything).Return(nil)
-			tokenService := new(mocks.MockTokenService)
+			tokenService := new(mocks.TokenService)
 			tokenService.On("IssueTokenPair", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&models.Token{JTI: "test"}, &models.Token{}, nil)
+			blacklist := new(mocks.TokenBlacklistStore)
 			cfg := &config.Config{Server: config.ServerConfig{IssuerURL: "http://localhost:8080"}}
 
-			service := NewDeviceAppService(deviceRepo, auditService, keyFetcher, policyService, tokenService, cfg, logger.NewDefaultLogger())
+			service := NewDeviceAppService(deviceRepo, auditService, keyFetcher, policyService, tokenService, blacklist, cfg, logger.NewDefaultLogger())
 
-			tc.setupMocks(keyFetcher, deviceRepo, policyService)
+			tc.setupMocks(keyFetcher, deviceRepo, policyService, blacklist)
 
-			req := &dto.RegisterDeviceRequest{
+			req := &dto.DeviceRegisterRequest{
 				ClientID:        clientID,
 				ClientAssertion: tc.assertion,
 				AgentID:         "test-agent",
