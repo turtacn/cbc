@@ -47,9 +47,9 @@ func (_m *TokenService) CleanupExpiredTokens(ctx context.Context, before time.Ti
 	return r0, r1
 }
 
-// GenerateAccessToken provides a mock function with given fields: ctx, refreshToken, requestedScope
-func (_m *TokenService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, requestedScope []string) (*models.Token, error) {
-	ret := _m.Called(ctx, refreshToken, requestedScope)
+// GenerateAccessToken provides a mock function with given fields: ctx, refreshToken, ttl, scope, trustLevel
+func (_m *TokenService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, ttl *time.Duration, scope string, trustLevel string) (*models.Token, error) {
+	ret := _m.Called(ctx, refreshToken, ttl, scope, trustLevel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GenerateAccessToken")
@@ -57,19 +57,19 @@ func (_m *TokenService) GenerateAccessToken(ctx context.Context, refreshToken *m
 
 	var r0 *models.Token
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *models.Token, []string) (*models.Token, error)); ok {
-		return rf(ctx, refreshToken, requestedScope)
+	if rf, ok := ret.Get(0).(func(context.Context, *models.Token, *time.Duration, string, string) (*models.Token, error)); ok {
+		return rf(ctx, refreshToken, ttl, scope, trustLevel)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *models.Token, []string) *models.Token); ok {
-		r0 = rf(ctx, refreshToken, requestedScope)
+	if rf, ok := ret.Get(0).(func(context.Context, *models.Token, *time.Duration, string, string) *models.Token); ok {
+		r0 = rf(ctx, refreshToken, ttl, scope, trustLevel)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Token)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *models.Token, []string) error); ok {
-		r1 = rf(ctx, refreshToken, requestedScope)
+	if rf, ok := ret.Get(1).(func(context.Context, *models.Token, *time.Duration, string, string) error); ok {
+		r1 = rf(ctx, refreshToken, ttl, scope, trustLevel)
 	} else {
 		r1 = ret.Error(1)
 	}

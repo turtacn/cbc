@@ -23,7 +23,7 @@ import (
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
 	httpRouter "github.com/turtacn/cbc/internal/interfaces/http/router"
 	"github.com/turtacn/cbc/pkg/logger"
-	"github.com/turtacn/cbc/tests/mocks"
+	"github.com/turtacn/cbc/internal/application/service/mocks"
 )
 
 func Test_Device_Authorization_Flow_E2E(t *testing.T) {

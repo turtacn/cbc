@@ -262,8 +262,8 @@ func (m *MockTokenDomainService) CleanupExpiredTokens(ctx context.Context, befor
 	args := m.Called(ctx, before)
 	return args.Get(0).(int64), args.Error(1)
 }
-func (m *MockTokenDomainService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, requestedScope []string) (*models.Token, error) {
-	args := m.Called(ctx, refreshToken, requestedScope)
+func (m *MockTokenDomainService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, ttl *time.Duration, scope string, trustLevel string) (*models.Token, error) {
+	args := m.Called(ctx, refreshToken, ttl, scope, trustLevel)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -343,6 +343,33 @@ func (m *MockAuditService) LogEvent(ctx context.Context, event models.AuditEvent
 	args := m.Called(ctx, event)
 	return args.Error(0)
 }
+
+type MockRiskOracle struct {
+	mock.Mock
+}
+
+func (m *MockRiskOracle) GetTenantRisk(ctx context.Context, tenantID, agentID string) (*models.TenantRiskProfile, error) {
+	args := m.Called(ctx, tenantID, agentID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.TenantRiskProfile), args.Error(1)
+}
+
+type MockPolicyEngine struct {
+	mock.Mock
+}
+
+func (m *MockPolicyEngine) EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel {
+	args := m.Called(ctx, riskProfile)
+	return args.Get(0).(models.TrustLevel)
+}
+
+func (m *MockPolicyEngine) CheckKeyGeneration(ctx context.Context, policy models.PolicyRequest) error {
+	args := m.Called(ctx, policy)
+	return args.Error(0)
+}
+
 func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 	// Arrange
 	mockTokenService := new(MockTokenDomainService)
@@ -353,6 +380,8 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 	mockAuditService := new(MockAuditService)
 	log := logger.NewDefaultLogger()
 
+	mockRiskOracle := new(MockRiskOracle)
+	mockPolicyEngine := new(MockPolicyEngine)
 	authService := NewAuthAppService(
 		mockTokenService,
 		mockDeviceRepo,
@@ -360,6 +389,8 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 		mockRateLimiter,
 		mockBlacklist,
 		mockAuditService,
+		mockRiskOracle,
+		mockPolicyEngine,
 		log,
 	)
 
@@ -389,7 +420,9 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 	mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh").Return(true, 0, time.Time{}, nil)
 	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(&models.Device{Status: constants.DeviceStatusActive}, nil)
 	mockBlacklist.On("Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt).Return(nil)
-	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, []string(nil)).Return(newAccessToken, nil)
+	mockRiskOracle.On("GetTenantRisk", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID).Return(&models.TenantRiskProfile{}, nil)
+	mockPolicyEngine.On("EvaluateTrustLevel", ctx, &models.TenantRiskProfile{}).Return(models.TrustLevelHigh)
+	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, mock.AnythingOfType("*time.Duration"), "agent:read agent:write", "high").Return(newAccessToken, nil)
 	mockTokenService.On("IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil)).Return(newRefreshToken, nil)
 	mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil)
 	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
@@ -408,7 +441,7 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 	mockRateLimiter.AssertCalled(t, "Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh")
 	mockDeviceRepo.AssertCalled(t, "FindByID", ctx, oldRefreshToken.DeviceID)
 	mockBlacklist.AssertCalled(t, "Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt)
-	mockTokenService.AssertCalled(t, "GenerateAccessToken", ctx, oldRefreshToken, []string(nil))
+	mockTokenService.AssertCalled(t, "GenerateAccessToken", ctx, oldRefreshToken, mock.AnythingOfType("*time.Duration"), "agent:read agent:write", "high")
 	mockTokenService.AssertCalled(t, "IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil))
 	mockDeviceRepo.AssertCalled(t, "Update", ctx, mock.AnythingOfType("*models.Device"))
 	mockAuditService.AssertNumberOfCalls(t, "LogEvent", 2)
@@ -431,6 +464,8 @@ func Test_AuthAppService_RefreshToken_ReplayAttack(t *testing.T) {
 		mockRateLimiter,
 		mockBlacklist,
 		mockAuditService,
+		nil,
+		nil,
 		log,
 	)
 
@@ -463,4 +498,209 @@ func Test_AuthAppService_RefreshToken_ReplayAttack(t *testing.T) {
 	mockBlacklist.AssertNotCalled(t, "Revoke")
 	mockTokenService.AssertNotCalled(t, "GenerateAccessToken")
 	mockTokenService.AssertNotCalled(t, "IssueToken")
+}
+
+func Test_AuthAppService_RefreshToken_HighTrust(t *testing.T) {
+	// Arrange
+	mockTokenService := new(MockTokenDomainService)
+	mockDeviceRepo := new(MockDeviceRepo)
+	mockTenantRepo := new(MockTenantRepo)
+	mockRateLimiter := new(MockRateLimiter)
+	mockBlacklist := new(MockBlacklistStore)
+	mockAuditService := new(MockAuditService)
+	mockRiskOracle := new(MockRiskOracle)
+	mockPolicyEngine := new(MockPolicyEngine)
+	log := logger.NewDefaultLogger()
+
+	authService := NewAuthAppService(
+		mockTokenService,
+		mockDeviceRepo,
+		mockTenantRepo,
+		mockRateLimiter,
+		mockBlacklist,
+		mockAuditService,
+		mockRiskOracle,
+		mockPolicyEngine,
+		log,
+	)
+
+	ctx := context.Background()
+	req := &dto.RefreshTokenRequest{
+		RefreshToken: "valid-refresh-token",
+		TenantID:     "tenant-1",
+	}
+
+	oldRefreshToken := &models.Token{
+		JTI:       "old-jti",
+		TenantID:  "tenant-1",
+		DeviceID:  "device-1",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	newAccessToken := &models.Token{
+		JTI:       "new-access-token",
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}
+	newRefreshToken := &models.Token{
+		JTI: "new-refresh-token",
+	}
+
+	riskProfile := &models.TenantRiskProfile{}
+
+	mockTokenService.On("VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID).Return(oldRefreshToken, nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(false, nil)
+	mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh").Return(true, 0, time.Time{}, nil)
+	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(&models.Device{Status: constants.DeviceStatusActive}, nil)
+	mockBlacklist.On("Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt).Return(nil)
+	mockRiskOracle.On("GetTenantRisk", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID).Return(riskProfile, nil)
+	mockPolicyEngine.On("EvaluateTrustLevel", ctx, riskProfile).Return(models.TrustLevelHigh)
+	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, mock.AnythingOfType("*time.Duration"), "agent:read agent:write", "high").Return(newAccessToken, nil)
+	mockTokenService.On("IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil)).Return(newRefreshToken, nil)
+	mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil)
+	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
+
+	// Act
+	resp, err := authService.RefreshToken(ctx, req)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "new-access-token", resp.AccessToken)
+	assert.Equal(t, "new-refresh-token", resp.RefreshToken)
+}
+
+func Test_AuthAppService_RefreshToken_LowTrust(t *testing.T) {
+	// Arrange
+	mockTokenService := new(MockTokenDomainService)
+	mockDeviceRepo := new(MockDeviceRepo)
+	mockTenantRepo := new(MockTenantRepo)
+	mockRateLimiter := new(MockRateLimiter)
+	mockBlacklist := new(MockBlacklistStore)
+	mockAuditService := new(MockAuditService)
+	mockRiskOracle := new(MockRiskOracle)
+	mockPolicyEngine := new(MockPolicyEngine)
+	log := logger.NewDefaultLogger()
+
+	authService := NewAuthAppService(
+		mockTokenService,
+		mockDeviceRepo,
+		mockTenantRepo,
+		mockRateLimiter,
+		mockBlacklist,
+		mockAuditService,
+		mockRiskOracle,
+		mockPolicyEngine,
+		log,
+	)
+
+	ctx := context.Background()
+	req := &dto.RefreshTokenRequest{
+		RefreshToken: "valid-refresh-token",
+		TenantID:     "tenant-1",
+	}
+
+	oldRefreshToken := &models.Token{
+		JTI:       "old-jti",
+		TenantID:  "tenant-1",
+		DeviceID:  "device-1",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	newAccessToken := &models.Token{
+		JTI:       "new-access-token",
+		ExpiresAt: time.Now().Add(60 * time.Second),
+	}
+	newRefreshToken := &models.Token{
+		JTI: "new-refresh-token",
+	}
+
+	riskProfile := &models.TenantRiskProfile{}
+
+	mockTokenService.On("VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID).Return(oldRefreshToken, nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(false, nil)
+	mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh").Return(true, 0, time.Time{}, nil)
+	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(&models.Device{Status: constants.DeviceStatusActive}, nil)
+	mockBlacklist.On("Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt).Return(nil)
+	mockRiskOracle.On("GetTenantRisk", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID).Return(riskProfile, nil)
+	mockPolicyEngine.On("EvaluateTrustLevel", ctx, riskProfile).Return(models.TrustLevelLow)
+	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, mock.AnythingOfType("*time.Duration"), "agent:read", "low").Return(newAccessToken, nil)
+	mockTokenService.On("IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil)).Return(newRefreshToken, nil)
+	mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil)
+	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
+
+	// Act
+	resp, err := authService.RefreshToken(ctx, req)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "new-access-token", resp.AccessToken)
+	assert.Equal(t, "new-refresh-token", resp.RefreshToken)
+}
+
+func Test_AuthAppService_RefreshToken_RiskOracleError(t *testing.T) {
+	// Arrange
+	mockTokenService := new(MockTokenDomainService)
+	mockDeviceRepo := new(MockDeviceRepo)
+	mockTenantRepo := new(MockTenantRepo)
+	mockRateLimiter := new(MockRateLimiter)
+	mockBlacklist := new(MockBlacklistStore)
+	mockAuditService := new(MockAuditService)
+	mockRiskOracle := new(MockRiskOracle)
+	mockPolicyEngine := new(MockPolicyEngine)
+	log := logger.NewDefaultLogger()
+
+	authService := NewAuthAppService(
+		mockTokenService,
+		mockDeviceRepo,
+		mockTenantRepo,
+		mockRateLimiter,
+		mockBlacklist,
+		mockAuditService,
+		mockRiskOracle,
+		mockPolicyEngine,
+		log,
+	)
+
+	ctx := context.Background()
+	req := &dto.RefreshTokenRequest{
+		RefreshToken: "valid-refresh-token",
+		TenantID:     "tenant-1",
+	}
+
+	oldRefreshToken := &models.Token{
+		JTI:       "old-jti",
+		TenantID:  "tenant-1",
+		DeviceID:  "device-1",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	newAccessToken := &models.Token{
+		JTI:       "new-access-token",
+		ExpiresAt: time.Now().Add(60 * time.Second),
+	}
+	newRefreshToken := &models.Token{
+		JTI: "new-refresh-token",
+	}
+
+	mockTokenService.On("VerifyToken", ctx, req.RefreshToken, constants.TokenTypeRefresh, req.TenantID).Return(oldRefreshToken, nil)
+	mockBlacklist.On("IsRevoked", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI).Return(false, nil)
+	mockRateLimiter.On("Allow", ctx, domainservice.RateLimitDimension("agent"), fmt.Sprintf("agent:%s:refresh", oldRefreshToken.DeviceID), "refresh").Return(true, 0, time.Time{}, nil)
+	mockDeviceRepo.On("FindByID", ctx, oldRefreshToken.DeviceID).Return(&models.Device{Status: constants.DeviceStatusActive}, nil)
+	mockBlacklist.On("Revoke", ctx, oldRefreshToken.TenantID, oldRefreshToken.JTI, oldRefreshToken.ExpiresAt).Return(nil)
+	mockRiskOracle.On("GetTenantRisk", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID).Return(nil, assert.AnError)
+	mockPolicyEngine.On("EvaluateTrustLevel", ctx, &models.TenantRiskProfile{AnomalyScore: 1.0}).Return(models.TrustLevelLow)
+	mockTokenService.On("GenerateAccessToken", ctx, oldRefreshToken, mock.AnythingOfType("*time.Duration"), "agent:read", "low").Return(newAccessToken, nil)
+	mockTokenService.On("IssueToken", ctx, oldRefreshToken.TenantID, oldRefreshToken.DeviceID, []string(nil)).Return(newRefreshToken, nil)
+	mockDeviceRepo.On("Update", ctx, mock.AnythingOfType("*models.Device")).Return(nil)
+	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
+
+	// Act
+	resp, err := authService.RefreshToken(ctx, req)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "new-access-token", resp.AccessToken)
+	assert.Equal(t, "new-refresh-token", resp.RefreshToken)
 }

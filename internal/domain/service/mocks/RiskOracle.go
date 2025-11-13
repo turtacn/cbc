@@ -14,9 +14,9 @@ type RiskOracle struct {
 	mock.Mock
 }
 
-// GetTenantRisk provides a mock function with given fields: ctx, tenantID
-func (_m *RiskOracle) GetTenantRisk(ctx context.Context, tenantID string) (*models.TenantRiskProfile, error) {
-	ret := _m.Called(ctx, tenantID)
+// GetTenantRisk provides a mock function with given fields: ctx, tenantID, agentID
+func (_m *RiskOracle) GetTenantRisk(ctx context.Context, tenantID string, agentID string) (*models.TenantRiskProfile, error) {
+	ret := _m.Called(ctx, tenantID, agentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTenantRisk")
@@ -24,19 +24,19 @@ func (_m *RiskOracle) GetTenantRisk(ctx context.Context, tenantID string) (*mode
 
 	var r0 *models.TenantRiskProfile
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*models.TenantRiskProfile, error)); ok {
-		return rf(ctx, tenantID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*models.TenantRiskProfile, error)); ok {
+		return rf(ctx, tenantID, agentID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *models.TenantRiskProfile); ok {
-		r0 = rf(ctx, tenantID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *models.TenantRiskProfile); ok {
+		r0 = rf(ctx, tenantID, agentID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.TenantRiskProfile)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, tenantID)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, tenantID, agentID)
 	} else {
 		r1 = ret.Error(1)
 	}

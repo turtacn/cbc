@@ -9,7 +9,6 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 )
 
-//go:generate mockery --name KeyProvider --output mocks --outpkg mocks
 // KeyProvider defines the interface for physical cryptographic key operations, abstracting the underlying hardware or service (e.g., HSM, Vault).
 // KeyProvider 定义了物理加密密钥操作的接口，抽象了底层硬件或服务（例如，HSM、Vault）。
 type KeyProvider interface {
@@ -36,7 +35,6 @@ type KeyProvider interface {
 	Restore(ctx context.Context, encryptedBlob []byte) (providerRef string, err error)
 }
 
-//go:generate mockery --name KeyManagementService --output mocks --outpkg mocks
 // KeyManagementService defines the interface for managing the logical lifecycle of cryptographic keys.
 // KeyManagementService 定义了管理加密密钥逻辑生命周期的接口。
 type KeyManagementService interface {
@@ -161,7 +159,6 @@ type CDNCacheManager interface {
 	PurgePath(ctx context.Context, path string) error
 }
 
-//go:generate mockery --name KeyLifecycleRegistry --output mocks --outpkg mocks
 // KeyLifecycleRegistry defines the interface for logging key lifecycle events for compliance.
 // KeyLifecycleRegistry 定义了用于记录密钥生命周期事件以实现合规性的接口。
 type KeyLifecycleRegistry interface {
@@ -170,20 +167,20 @@ type KeyLifecycleRegistry interface {
 	LogEvent(ctx context.Context, event models.KLREvent) error
 }
 
-//go:generate mockery --name PolicyEngine --output mocks --outpkg mocks
 // PolicyEngine defines the interface for checking actions against defined policies.
 // PolicyEngine 定义了用于根据定义的策略检查操作的接口。
 type PolicyEngine interface {
+	// EvaluateTrustLevel evaluates the trust level of a device based on its risk profile.
+	EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel
 	// CheckKeyGeneration checks if generating a key with the given specs is allowed by policy.
 	// CheckKeyGeneration 检查策略是否允许使用给定规范生成密钥。
 	CheckKeyGeneration(ctx context.Context, policy models.PolicyRequest) error
 }
 
-//go:generate mockery --name RiskOracle --output mocks --outpkg mocks
 // RiskOracle defines the interface for obtaining tenant risk profiles from a risk analysis system.
 // RiskOracle 定义了用于从风险分析系统获取租户风险配置文件的接口。
 type RiskOracle interface {
 	// GetTenantRisk retrieves the current risk profile for a tenant.
 	// GetTenantRisk 检索租户的当前风险配置文件。
-	GetTenantRisk(ctx context.Context, tenantID string) (*models.TenantRiskProfile, error)
+	GetTenantRisk(ctx context.Context, tenantID, agentID string) (*models.TenantRiskProfile, error)
 }

@@ -32,6 +32,24 @@ func (_m *PolicyEngine) CheckKeyGeneration(ctx context.Context, policy models.Po
 	return r0
 }
 
+// EvaluateTrustLevel provides a mock function with given fields: ctx, riskProfile
+func (_m *PolicyEngine) EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel {
+	ret := _m.Called(ctx, riskProfile)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EvaluateTrustLevel")
+	}
+
+	var r0 models.TrustLevel
+	if rf, ok := ret.Get(0).(func(context.Context, *models.TenantRiskProfile) models.TrustLevel); ok {
+		r0 = rf(ctx, riskProfile)
+	} else {
+		r0 = ret.Get(0).(models.TrustLevel)
+	}
+
+	return r0
+}
+
 // NewPolicyEngine creates a new instance of PolicyEngine. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewPolicyEngine(t interface {

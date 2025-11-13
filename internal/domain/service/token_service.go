@@ -65,7 +65,9 @@ type TokenService interface {
 	GenerateAccessToken(
 		ctx context.Context,
 		refreshToken *models.Token,
-		requestedScope []string,
+		ttl *time.Duration,
+		scope string,
+		trustLevel string,
 	) (*models.Token, error)
 
 	// ValidateTokenClaims performs business rule validation on token claims.

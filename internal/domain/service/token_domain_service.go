@@ -60,7 +60,7 @@ func (s *tokenDomainService) IssueTokenPair(
 		refreshToken.Metadata["device_trust_level"] = trustLevel
 	}
 
-	accessToken, err = s.GenerateAccessToken(ctx, refreshToken, scope)
+	accessToken, err = s.GenerateAccessToken(ctx, refreshToken, nil, strings.Join(scope, " "), "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -93,7 +93,7 @@ func (s *tokenDomainService) RefreshToken(
 	}
 
 	// 3. Generate a new access token and a new refresh token
-	accessToken, err = s.GenerateAccessToken(ctx, oldRefreshToken, requestedScope)
+	accessToken, err = s.GenerateAccessToken(ctx, oldRefreshToken, nil, strings.Join(requestedScope, " "), "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -161,21 +161,27 @@ func (s *tokenDomainService) IsTokenRevoked(ctx context.Context, jti string) (bo
 func (s *tokenDomainService) GenerateAccessToken(
 	ctx context.Context,
 	refreshToken *models.Token,
-	requestedScope []string,
+	ttl *time.Duration,
+	scope string,
+	trustLevel string,
 ) (*models.Token, error) {
-	trustLevel, _ := refreshToken.Metadata["device_trust_level"].(string)
-	return s.generateAccessToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, requestedScope, trustLevel)
+	return s.generateAccessToken(ctx, refreshToken.TenantID, refreshToken.DeviceID, ttl, scope, trustLevel)
 }
 
 // generateAccessToken is a helper function to create and sign an access token.
 // generateAccessToken 是一个用于创建和签署访问令牌的辅助函数。
-func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, scope []string, trustLevel string) (*models.Token, error) {
+func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, deviceID string, ttl *time.Duration, scope string, trustLevel string) (*models.Token, error) {
 	now := time.Now()
+	// Default TTL if not provided
+	if ttl == nil {
+		defaultTTL := 15 * time.Minute
+		ttl = &defaultTTL
+	}
 	claims := jwt.MapClaims{
 		"sub":                deviceID,
 		"jti":                uuid.New().String(),
 		"iat":                now.Unix(),
-		"exp":                now.Add(15 * time.Minute).Unix(),
+		"exp":                now.Add(*ttl).Unix(),
 		"iss":                "cbc-auth-service",
 		"aud":                "cbc-api",
 		"tid":                tenantID,
@@ -192,7 +198,7 @@ func (s *tokenDomainService) generateAccessToken(ctx context.Context, tenantID, 
 		JTI:       claims["jti"].(string),
 		TenantID:  tenantID,
 		DeviceID:  deviceID,
-		Scope:     strings.Join(scope, " "),
+		Scope:     scope,
 		TokenType: constants.TokenTypeAccess,
 		IssuedAt:  now,
 		ExpiresAt: time.Unix(claims["exp"].(int64), 0),
@@ -259,5 +265,5 @@ func (s *tokenDomainService) CleanupExpiredTokens(ctx context.Context, before ti
 // IssueToken issues a simple token (e.g., for client credentials flow) without a refresh token.
 // IssueToken 颁发一个简单的令牌（例如，用于客户端凭据流），没有刷新令牌。
 func (s *tokenDomainService) IssueToken(ctx context.Context, tenantID, subject string, scope []string) (*models.Token, error) {
-	return s.generateAccessToken(ctx, tenantID, subject, scope, "") // No trust level needed for this flow
+	return s.generateAccessToken(ctx, tenantID, subject, nil, strings.Join(scope, " "), "") // No trust level needed for this flow
 }

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/interfaces/http/handlers"
-	"github.com/turtacn/cbc/tests/mocks"
+	"github.com/turtacn/cbc/internal/application/service/mocks"
 )
 
 func TestOAuthHandler_StartDeviceAuthorization(t *testing.T) {

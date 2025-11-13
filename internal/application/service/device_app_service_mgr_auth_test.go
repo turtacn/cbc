@@ -199,6 +199,7 @@ func TestDeviceAppService_RegisterDevice_MgrAuth(t *testing.T) {
 			cfg := &config.Config{Server: config.ServerConfig{IssuerURL: "http://localhost:8080"}}
 
 			service := NewDeviceAppService(deviceRepo, auditService, keyFetcher, policyService, tokenService, blacklist, cfg, logger.NewDefaultLogger())
+			tokenService.On("GenerateAccessToken", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&models.Token{}, nil)
 
 			tc.setupMocks(keyFetcher, deviceRepo, policyService, blacklist)
 

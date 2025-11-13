@@ -20,3 +20,15 @@ type TenantRiskProfile struct {
 	// LastUpdated 是上次计算和更新此风险配置文件的时间戳。
 	LastUpdated time.Time `json:"last_updated"`
 }
+
+// TrustLevel is a categorical representation of device or tenant trust.
+type TrustLevel string
+
+const (
+	// TrustLevelHigh indicates a high level of trust.
+	TrustLevelHigh TrustLevel = "high"
+	// TrustLevelMedium indicates a medium level of trust.
+	TrustLevelMedium TrustLevel = "medium"
+	// TrustLevelLow indicates a low level of trust.
+	TrustLevelLow TrustLevel = "low"
+)

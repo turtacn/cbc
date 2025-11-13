@@ -53,6 +53,8 @@ type authAppServiceImpl struct {
 	rateLimitService  domainService.RateLimitService
 	blacklist         domainService.TokenBlacklistStore
 	auditService      domainService.AuditService
+	riskOracle        domainService.RiskOracle
+	policyEngine      domainService.PolicyEngine
 	logger            logger.Logger
 }
 
@@ -67,6 +69,8 @@ func NewAuthAppService(
 	rateLimitService domainService.RateLimitService,
 	blacklist domainService.TokenBlacklistStore,
 	auditService domainService.AuditService,
+	riskOracle domainService.RiskOracle,
+	policyEngine domainService.PolicyEngine,
 	log logger.Logger,
 ) AuthAppService {
 	return &authAppServiceImpl{
@@ -76,6 +80,8 @@ func NewAuthAppService(
 		rateLimitService: rateLimitService,
 		blacklist:        blacklist,
 		auditService:     auditService,
+		riskOracle:       riskOracle,
+		policyEngine:     policyEngine,
 		logger:           log,
 	}
 }
@@ -308,8 +314,38 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 		return nil, errors.ErrServerError("failed to revoke old refresh token").WithCause(err)
 	}
 
-	// 3. Generate New Tokens
-	newAccessToken, err := s.tokenService.GenerateAccessToken(ctx, refreshToken, nil)
+	// 3. Assess Risk
+	riskProfile, err := s.riskOracle.GetTenantRisk(ctx, refreshToken.TenantID, refreshToken.DeviceID)
+	if err != nil {
+		s.logger.Warn(ctx, "Failed to get tenant risk, defaulting to low trust", logger.Error(err))
+		// Default to a profile that ensures low trust on error
+		riskProfile = &models.TenantRiskProfile{AnomalyScore: 1.0}
+	}
+	trustLevel := s.policyEngine.EvaluateTrustLevel(ctx, riskProfile)
+
+	// 4. Determine Token Parameters
+	defaultTTL := 15 * time.Minute
+	defaultScope := "agent:read agent:write"
+	var newTTL time.Duration
+	var newScope string
+
+	switch trustLevel {
+	case models.TrustLevelHigh:
+		newTTL = defaultTTL
+		newScope = defaultScope
+	case models.TrustLevelMedium:
+		newTTL = 5 * time.Minute
+		newScope = defaultScope
+	case models.TrustLevelLow:
+		newTTL = 60 * time.Second
+		newScope = "agent:read"
+	default:
+		newTTL = 60 * time.Second
+		newScope = "" // No scope for unknown trust levels
+	}
+
+	// 5. Generate New Tokens
+	newAccessToken, err := s.tokenService.GenerateAccessToken(ctx, refreshToken, &newTTL, newScope, string(trustLevel))
 	if err != nil {
 		s.logger.Error(ctx, "Failed to generate new access token", err, logger.String("agent_id", refreshToken.DeviceID))
 		return nil, errors.ErrServerError("failed to generate new access token").WithCause(err)
