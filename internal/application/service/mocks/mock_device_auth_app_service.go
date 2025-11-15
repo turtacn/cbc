@@ -44,6 +44,36 @@ func (_m *MockDeviceAuthAppService) PollDeviceToken(ctx context.Context, deviceC
 	return r0, r1
 }
 
+// RegisterDevice provides a mock function with given fields: ctx, req
+func (_m *MockDeviceAuthAppService) RegisterDevice(ctx context.Context, req *dto.DeviceRegisterRequest) (*dto.TokenResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterDevice")
+	}
+
+	var r0 *dto.TokenResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *dto.DeviceRegisterRequest) (*dto.TokenResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *dto.DeviceRegisterRequest) *dto.TokenResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dto.TokenResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *dto.DeviceRegisterRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // StartDeviceFlow provides a mock function with given fields: ctx, clientID, scope
 func (_m *MockDeviceAuthAppService) StartDeviceFlow(ctx context.Context, clientID string, scope string) (*dto.DeviceAuthResponse, error) {
 	ret := _m.Called(ctx, clientID, scope)

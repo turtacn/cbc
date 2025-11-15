@@ -3,13 +3,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/turtacn/cbc/internal/application/dto"
 	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/internal/domain/repository"
 	"github.com/turtacn/cbc/internal/domain/service"
+	"github.com/turtacn/cbc/pkg/constants"
 	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 	"github.com/turtacn/cbc/pkg/utils"
 )
 
@@ -28,15 +32,23 @@ type DeviceAuthAppService interface {
 	// PollDeviceToken is called by the device to poll for the token after the user has completed verification.
 	// PollDeviceToken 在用户完成验证后由设备调用以轮询令牌。
 	PollDeviceToken(ctx context.Context, deviceCode, clientID string) (*dto.TokenResponse, error)
+	// RegisterDevice handles the registration of a new device and issues its first token pair.
+	// RegisterDevice 处理新设备的注册并颁发其第一个令牌对。
+	RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error)
 }
 
 // deviceAuthAppServiceImpl is the concrete implementation of the DeviceAuthAppService interface.
 // deviceAuthAppServiceImpl 是 DeviceAuthAppService 接口的具体实现。
 type deviceAuthAppServiceImpl struct {
-	deviceAuthStore service.DeviceAuthStore
-	tokenService    service.TokenService
-	kms             service.KeyManagementService
-	cfg             *config.OAuthConfig
+	deviceAuthStore  service.DeviceAuthStore
+	tokenService     service.TokenService
+	kms              service.KeyManagementService
+	cfg              *config.OAuthConfig
+	deviceRepo       repository.DeviceRepository
+	tenantRepo       repository.TenantRepository
+	rateLimitService service.RateLimitService
+	auditService     service.AuditService
+	logger           logger.Logger
 }
 
 // NewDeviceAuthAppService creates a new instance of DeviceAuthAppService.
@@ -46,12 +58,22 @@ func NewDeviceAuthAppService(
 	tokenService service.TokenService,
 	kms service.KeyManagementService,
 	cfg *config.OAuthConfig,
+	deviceRepo repository.DeviceRepository,
+	tenantRepo repository.TenantRepository,
+	rateLimitService service.RateLimitService,
+	auditService service.AuditService,
+	log logger.Logger,
 ) DeviceAuthAppService {
 	return &deviceAuthAppServiceImpl{
-		deviceAuthStore: deviceAuthStore,
-		tokenService:    tokenService,
-		kms:             kms,
-		cfg:             cfg,
+		deviceAuthStore:  deviceAuthStore,
+		tokenService:     tokenService,
+		kms:              kms,
+		cfg:              cfg,
+		deviceRepo:       deviceRepo,
+		tenantRepo:       tenantRepo,
+		rateLimitService: rateLimitService,
+		auditService:     auditService,
+		logger:           log,
 	}
 }
 
@@ -174,4 +196,103 @@ func (s *deviceAuthAppServiceImpl) PollDeviceToken(ctx context.Context, deviceCo
 	default:
 		return nil, errors.ErrServerError("unknown device auth session status")
 	}
+}
+
+// RegisterDevice handles the business logic for device registration.
+// It validates the request, checks tenant status, enforces rate limits, creates a new device if it doesn't exist, and issues the initial token pair.
+// RegisterDevice 处理设备注册的业务逻辑。
+// 它验证请求，检查租户状态，强制执行速率限制，如果设备不存在则创建新设备，并颁发初始令牌对。
+func (s *deviceAuthAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error) {
+	if err := utils.ValidateStruct(req); err != nil {
+		s.logger.Error(ctx, "Invalid register device request", err)
+		return nil, errors.ErrInvalidRequest("invalid register device request").WithCause(err)
+	}
+
+	if s.tenantRepo == nil || s.rateLimitService == nil || s.deviceRepo == nil || s.tokenService == nil {
+		s.logger.Error(ctx, "Service dependencies are not initialized", nil)
+		return nil, errors.ErrServerError("service dependencies not initialized")
+	}
+
+	tenant, err := s.tenantRepo.FindByID(ctx, req.TenantID)
+	if err != nil {
+		s.logger.Error(ctx, "Failed to get tenant", err, logger.String("tenant_id", req.TenantID))
+		return nil, errors.ErrInvalidRequest("failed to get tenant").WithCause(err)
+	}
+	if tenant == nil {
+		return nil, errors.ErrTenantNotFound(req.TenantID)
+	}
+	if tenant.Status != constants.TenantStatusActive {
+		s.logger.Warn(ctx, "Tenant is not active", logger.String("tenant_id", req.TenantID), logger.String("status", string(tenant.Status)))
+		return nil, errors.ErrTenantSuspended(req.TenantID)
+	}
+
+	rateLimitKey := fmt.Sprintf("mgr:%s:register", req.ClientID)
+	allowed, _, _, err := s.rateLimitService.Allow(ctx, "mgr", rateLimitKey, "register")
+	if err != nil {
+		s.logger.Error(ctx, "Failed to check rate limit", err, logger.String("key", rateLimitKey))
+		return nil, errors.ErrServerError("failed to check rate limit").WithCause(err)
+	}
+	if !allowed {
+		s.logger.Warn(ctx, "Rate limit exceeded for MGR", logger.String("mgr_client_id", req.ClientID))
+		return nil, errors.ErrRateLimitExceeded("mgr", 0)
+	}
+
+	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
+	if err != nil && !errors.IsNotFoundError(err) {
+		s.logger.Error(ctx, "Failed to check device existence", err, logger.String("agent_id", req.AgentID))
+		return nil, errors.ErrServerError("failed to check device existence").WithCause(err)
+	}
+
+	if existingDevice != nil {
+		if existingDevice.DeviceFingerprint != req.DeviceFingerprint {
+			s.logger.Warn(ctx, "Device fingerprint mismatch", logger.String("agent_id", req.AgentID))
+			return nil, errors.ErrInvalidRequest("device fingerprint mismatch")
+		}
+		s.logger.Info(ctx, "Device already registered, proceeding to issue token", logger.String("agent_id", req.AgentID))
+	} else {
+		device := &models.Device{
+			DeviceID:          req.AgentID,
+			TenantID:          req.TenantID,
+			DeviceFingerprint: req.DeviceFingerprint,
+			Status:            constants.DeviceStatusActive,
+			RegisteredAt:      time.Now(),
+			LastSeenAt:        time.Now(),
+		}
+
+		if err := s.deviceRepo.Save(ctx, device); err != nil {
+			s.logger.Error(ctx, "Failed to create device", err, logger.String("agent_id", req.AgentID))
+			return nil, errors.ErrServerError("failed to create device").WithCause(err)
+		}
+		s.logger.Info(ctx, "New device registered successfully", logger.String("agent_id", req.AgentID))
+		s.auditService.LogEvent(ctx, models.AuditEvent{
+			EventType: "device.register",
+			TenantID:  req.TenantID,
+			Actor:     req.AgentID,
+			Success:   true,
+		})
+	}
+
+	refreshToken, accessToken, err := s.tokenService.IssueTokenPair(ctx, req.TenantID, req.AgentID, req.DeviceFingerprint, nil, nil)
+	if err != nil {
+		s.logger.Error(ctx, "Failed to issue token pair", err, logger.String("agent_id", req.AgentID))
+		return nil, err
+	}
+
+	if refreshToken == nil || accessToken == nil {
+		return nil, errors.ErrServerError("token service returned nil tokens without error")
+	}
+
+	s.logger.Info(ctx, "Device registration and token issuance successful",
+		logger.String("tenant_id", req.TenantID),
+		logger.String("agent_id", req.AgentID),
+	)
+
+	return &dto.TokenResponse{
+		AccessToken:  accessToken.JTI,
+		RefreshToken: refreshToken.JTI,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(accessToken.TimeUntilExpiry().Seconds()),
+		Scope:        accessToken.Scope,
+		IssuedAt:     accessToken.IssuedAt.Unix(),
+	}, nil
 }

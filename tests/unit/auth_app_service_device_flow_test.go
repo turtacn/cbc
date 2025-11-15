@@ -11,29 +11,41 @@ import (
 	"github.com/turtacn/cbc/internal/application/service"
 	"github.com/turtacn/cbc/internal/config"
 	"github.com/turtacn/cbc/internal/domain/models"
-	"github.com/turtacn/cbc/internal/domain/service/mocks"
+	repoMocks "github.com/turtacn/cbc/internal/domain/repository/mocks"
+	serviceMocks "github.com/turtacn/cbc/internal/domain/service/mocks"
 	"github.com/turtacn/cbc/pkg/errors"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
 type DeviceAuthAppServiceTestSuite struct {
-	t *testing.T
-	mockDeviceAuthStore *mocks.DeviceAuthStore
-	mockTokenService    *mocks.TokenService
-	mockKMS             *mocks.KeyManagementService
+	t                   *testing.T
+	mockDeviceAuthStore *serviceMocks.DeviceAuthStore
+	mockTokenService    *serviceMocks.TokenService
+	mockKMS             *serviceMocks.KeyManagementService
+	mockDeviceRepo      *repoMocks.DeviceRepository
+	mockTenantRepo      *repoMocks.TenantRepository
+	mockRateLimit       *serviceMocks.RateLimitService
+	mockAudit           *serviceMocks.AuditService
 	cfg                 *config.OAuthConfig
 	sut                 service.DeviceAuthAppService
 }
 
 func (s *DeviceAuthAppServiceTestSuite) SetupTest() {
-	s.mockDeviceAuthStore = new(mocks.DeviceAuthStore)
-	s.mockTokenService = new(mocks.TokenService)
-	s.mockKMS = new(mocks.KeyManagementService)
+	s.mockDeviceAuthStore = new(serviceMocks.DeviceAuthStore)
+	s.mockTokenService = new(serviceMocks.TokenService)
+	s.mockKMS = new(serviceMocks.KeyManagementService)
+	s.mockDeviceRepo = new(repoMocks.DeviceRepository)
+	s.mockTenantRepo = new(repoMocks.TenantRepository)
+	s.mockRateLimit = new(serviceMocks.RateLimitService)
+	s.mockAudit = new(serviceMocks.AuditService)
+
 	s.cfg = &config.OAuthConfig{
 		DeviceAuthExpiresIn: 600 * time.Second,
 		DeviceAuthInterval:  5 * time.Second,
 		VerificationURI:     "https://example.com/verify",
 	}
-	s.sut = service.NewDeviceAuthAppService(s.mockDeviceAuthStore, s.mockTokenService, s.mockKMS, s.cfg)
+	log := logger.NewNoopLogger()
+	s.sut = service.NewDeviceAuthAppService(s.mockDeviceAuthStore, s.mockTokenService, s.mockKMS, s.cfg, s.mockDeviceRepo, s.mockTenantRepo, s.mockRateLimit, s.mockAudit, log)
 }
 
 func TestDeviceAuthAppService(t *testing.T) {

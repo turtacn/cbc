@@ -392,6 +392,7 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 		mockRiskOracle,
 		mockPolicyEngine,
 		log,
+		new(MockMetrics),
 	)
 
 	ctx := context.Background()
@@ -428,6 +429,8 @@ func Test_AuthAppService_RefreshToken_Success(t *testing.T) {
 	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
 
 	// Act
+	mockMetrics := authService.(*authAppServiceImpl).metrics.(*MockMetrics)
+	mockMetrics.On("RecordTokenIssueByTrust", "high_trust", "tenant-1").Return()
 	resp, err := authService.RefreshToken(ctx, req)
 
 	// Assert
@@ -467,6 +470,7 @@ func Test_AuthAppService_RefreshToken_ReplayAttack(t *testing.T) {
 		nil,
 		nil,
 		log,
+		new(MockMetrics),
 	)
 
 	ctx := context.Background()
@@ -522,6 +526,7 @@ func Test_AuthAppService_RefreshToken_HighTrust(t *testing.T) {
 		mockRiskOracle,
 		mockPolicyEngine,
 		log,
+		new(MockMetrics),
 	)
 
 	ctx := context.Background()
@@ -560,6 +565,8 @@ func Test_AuthAppService_RefreshToken_HighTrust(t *testing.T) {
 	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
 
 	// Act
+	mockMetrics := authService.(*authAppServiceImpl).metrics.(*MockMetrics)
+	mockMetrics.On("RecordTokenIssueByTrust", "high_trust", "tenant-1").Return()
 	resp, err := authService.RefreshToken(ctx, req)
 
 	// Assert
@@ -591,6 +598,7 @@ func Test_AuthAppService_RefreshToken_LowTrust(t *testing.T) {
 		mockRiskOracle,
 		mockPolicyEngine,
 		log,
+		new(MockMetrics),
 	)
 
 	ctx := context.Background()
@@ -629,6 +637,8 @@ func Test_AuthAppService_RefreshToken_LowTrust(t *testing.T) {
 	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
 
 	// Act
+	mockMetrics := authService.(*authAppServiceImpl).metrics.(*MockMetrics)
+	mockMetrics.On("RecordTokenIssueByTrust", "low_trust", "tenant-1").Return()
 	resp, err := authService.RefreshToken(ctx, req)
 
 	// Assert
@@ -660,6 +670,7 @@ func Test_AuthAppService_RefreshToken_RiskOracleError(t *testing.T) {
 		mockRiskOracle,
 		mockPolicyEngine,
 		log,
+		new(MockMetrics),
 	)
 
 	ctx := context.Background()
@@ -696,6 +707,8 @@ func Test_AuthAppService_RefreshToken_RiskOracleError(t *testing.T) {
 	mockAuditService.On("LogEvent", ctx, mock.AnythingOfType("models.AuditEvent")).Return(nil).Twice()
 
 	// Act
+	mockMetrics := authService.(*authAppServiceImpl).metrics.(*MockMetrics)
+	mockMetrics.On("RecordTokenIssueByTrust", "low_trust", "tenant-1").Return()
 	resp, err := authService.RefreshToken(ctx, req)
 
 	// Assert

@@ -23,7 +23,7 @@ func NewRiskOracle(riskRepo repository.RiskRepository) service.RiskOracle {
 // If no specific profile is found in the repository, it gracefully falls back to a default low-risk profile.
 // GetTenantRisk 检索给定租户的风险画像。
 //如果在存储库中没有找到特定的画像，它会平滑地回退到默认的低风险画像。
-func (ro *riskOracle) GetTenantRisk(ctx context.Context, tenantID string) (*models.TenantRiskProfile, error) {
+func (ro *riskOracle) GetTenantRisk(ctx context.Context, tenantID, agentID string) (*models.TenantRiskProfile, error) {
 	profile, err := ro.riskRepo.GetTenantRiskProfile(ctx, tenantID)
 	if err != nil {
 		return nil, err // An actual error occurred.

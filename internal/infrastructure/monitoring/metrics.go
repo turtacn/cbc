@@ -14,14 +14,15 @@ import (
 type Metrics struct {
 	reg prometheus.Registerer
 	// Token 相关指标
-	TokenIssueRequests   *prometheus.CounterVec
-	TokenIssueSuccess    *prometheus.CounterVec
-	TokenIssueFailure    *prometheus.CounterVec
-	TokenIssueLatency    *prometheus.HistogramVec
-	TokenVerifyRequests  *prometheus.CounterVec
-	TokenVerifySuccess   *prometheus.CounterVec
-	TokenVerifyFailure   *prometheus.CounterVec
-	TokenRevokeTotal     *prometheus.CounterVec
+	TokenIssueRequests      *prometheus.CounterVec
+	TokenIssueSuccess       *prometheus.CounterVec
+	TokenIssueFailure       *prometheus.CounterVec
+	TokenIssueLatency       *prometheus.HistogramVec
+	TokenVerifyRequests     *prometheus.CounterVec
+	TokenVerifySuccess      *prometheus.CounterVec
+	TokenVerifyFailure      *prometheus.CounterVec
+	TokenRevokeTotal        *prometheus.CounterVec
+	AuthTokenIssueByTrust *prometheus.CounterVec
 
 	// Device 相关指标
 	DeviceRegisterRequests *prometheus.CounterVec
@@ -123,6 +124,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				Help: "Total number of token revocations",
 			},
 			[]string{"tenant_id", "reason"},
+		),
+
+		AuthTokenIssueByTrust: factory.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "auth_token_issue_requests_total",
+				Help: "Total number of token issue requests by trust level.",
+			},
+			[]string{"trust_level", "tenant_id"},
 		),
 
 		// Device 指标
@@ -252,6 +261,11 @@ func (m *Metrics) RecordTokenIssue(tenantID, grantType string, success bool, dur
 	}
 
 	m.TokenIssueLatency.WithLabelValues(tenantID).Observe(duration.Seconds())
+}
+
+// RecordTokenIssueByTrust 记录按信任级别划分的 Token 颁发
+func (m *Metrics) RecordTokenIssueByTrust(trustLevel, tenantID string) {
+	m.AuthTokenIssueByTrust.WithLabelValues(trustLevel, tenantID).Inc()
 }
 
 // RecordTokenVerify 记录 Token 验证请求

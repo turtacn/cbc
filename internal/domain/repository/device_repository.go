@@ -5,6 +5,7 @@ import (
 	"github.com/turtacn/cbc/internal/domain/models"
 )
 
+//go:generate mockery --name DeviceRepository --output ./mocks --filename device_repository.go --structname DeviceRepository
 // DeviceRepository defines the interface for interacting with the persistence layer for device data.
 // It provides a set of methods for creating, retrieving, updating, and listing devices.
 // DeviceRepository 定义了与设备数据的持久化层交互的接口。

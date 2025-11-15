@@ -16,7 +16,7 @@ import (
 	"github.com/turtacn/cbc/pkg/utils"
 )
 
-//go:generate mockery --name AuthAppService --output ../../domain/service/mocks --outpkg mocks
+//go:generate mockery --name AuthAppService --output mocks --outpkg mocks
 
 // AuthAppService defines the application service interface for authentication-related use cases.
 // It orchestrates domain services and repositories to handle operations like token issuance, refresh, and device registration.
@@ -38,24 +38,21 @@ type AuthAppService interface {
 	// IntrospectToken checks the validity of a token and returns its metadata.
 	// IntrospectToken 检查令牌的有效性并返回其元数据。
 	IntrospectToken(ctx context.Context, token string) (*dto.TokenIntrospectionResponse, error)
-
-	// RegisterDevice handles the registration of a new device and issues its first token pair.
-	// RegisterDevice 处理新设备的注册并颁发其第一个令牌对。
-	RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error)
 }
 
 // authAppServiceImpl is the concrete implementation of the AuthAppService interface.
 // authAppServiceImpl 是 AuthAppService 接口的具体实现。
 type authAppServiceImpl struct {
-	tokenService      domainService.TokenService
-	deviceRepo        repository.DeviceRepository
-	tenantRepo        repository.TenantRepository
-	rateLimitService  domainService.RateLimitService
-	blacklist         domainService.TokenBlacklistStore
-	auditService      domainService.AuditService
-	riskOracle        domainService.RiskOracle
-	policyEngine      domainService.PolicyEngine
-	logger            logger.Logger
+	tokenService     domainService.TokenService
+	deviceRepo       repository.DeviceRepository
+	tenantRepo       repository.TenantRepository
+	rateLimitService domainService.RateLimitService
+	blacklist        domainService.TokenBlacklistStore
+	auditService     domainService.AuditService
+	riskOracle       domainService.RiskOracle
+	policyEngine     domainService.PolicyEngine
+	logger           logger.Logger
+	metrics          domainService.Metrics
 }
 
 // NewAuthAppService creates a new instance of AuthAppService.
@@ -72,6 +69,7 @@ func NewAuthAppService(
 	riskOracle domainService.RiskOracle,
 	policyEngine domainService.PolicyEngine,
 	log logger.Logger,
+	metrics domainService.Metrics,
 ) AuthAppService {
 	return &authAppServiceImpl{
 		tokenService:     tokenService,
@@ -83,106 +81,8 @@ func NewAuthAppService(
 		riskOracle:       riskOracle,
 		policyEngine:     policyEngine,
 		logger:           log,
+		metrics:          metrics,
 	}
-}
-
-// RegisterDevice handles the business logic for device registration.
-// It validates the request, checks tenant status, enforces rate limits, creates a new device if it doesn't exist, and issues the initial token pair.
-// RegisterDevice 处理设备注册的业务逻辑。
-// 它验证请求，检查租户状态，强制执行速率限制，如果设备不存在则创建新设备，并颁发初始令牌对。
-func (s *authAppServiceImpl) RegisterDevice(ctx context.Context, req *dto.RegisterDeviceRequest) (*dto.TokenResponse, error) {
-	if err := utils.ValidateStruct(req); err != nil {
-		s.logger.Error(ctx, "Invalid register device request", err)
-		return nil, errors.ErrInvalidRequest("invalid register device request").WithCause(err)
-	}
-
-	if s.tenantRepo == nil || s.rateLimitService == nil || s.deviceRepo == nil || s.tokenService == nil {
-		s.logger.Error(ctx, "Service dependencies are not initialized", nil)
-		return nil, errors.ErrServerError("service dependencies not initialized")
-	}
-
-	tenant, err := s.tenantRepo.FindByID(ctx, req.TenantID)
-	if err != nil {
-		s.logger.Error(ctx, "Failed to get tenant", err, logger.String("tenant_id", req.TenantID))
-		return nil, errors.ErrInvalidRequest("failed to get tenant").WithCause(err)
-	}
-	if tenant == nil {
-		return nil, errors.ErrTenantNotFound(req.TenantID)
-	}
-	if tenant.Status != constants.TenantStatusActive {
-		s.logger.Warn(ctx, "Tenant is not active", logger.String("tenant_id", req.TenantID), logger.String("status", string(tenant.Status)))
-		return nil, errors.ErrTenantSuspended(req.TenantID)
-	}
-
-	rateLimitKey := fmt.Sprintf("mgr:%s:register", req.ClientID)
-	allowed, _, _, err := s.rateLimitService.Allow(ctx, "mgr", rateLimitKey, "register")
-	if err != nil {
-		s.logger.Error(ctx, "Failed to check rate limit", err, logger.String("key", rateLimitKey))
-		return nil, errors.ErrServerError("failed to check rate limit").WithCause(err)
-	}
-	if !allowed {
-		s.logger.Warn(ctx, "Rate limit exceeded for MGR", logger.String("mgr_client_id", req.ClientID))
-		return nil, errors.ErrRateLimitExceeded("mgr", 0)
-	}
-
-	existingDevice, err := s.deviceRepo.FindByID(ctx, req.AgentID)
-	if err != nil && !errors.IsNotFoundError(err) {
-		s.logger.Error(ctx, "Failed to check device existence", err, logger.String("agent_id", req.AgentID))
-		return nil, errors.ErrServerError("failed to check device existence").WithCause(err)
-	}
-
-	if existingDevice != nil {
-		if existingDevice.DeviceFingerprint != req.DeviceFingerprint {
-			s.logger.Warn(ctx, "Device fingerprint mismatch", logger.String("agent_id", req.AgentID))
-			return nil, errors.ErrInvalidRequest("device fingerprint mismatch")
-		}
-		s.logger.Info(ctx, "Device already registered, proceeding to issue token", logger.String("agent_id", req.AgentID))
-	} else {
-		device := &models.Device{
-			DeviceID:          req.AgentID,
-			TenantID:          req.TenantID,
-			DeviceFingerprint: req.DeviceFingerprint,
-			Status:            constants.DeviceStatusActive,
-			RegisteredAt:      time.Now(),
-			LastSeenAt:        time.Now(),
-		}
-
-		if err := s.deviceRepo.Save(ctx, device); err != nil {
-			s.logger.Error(ctx, "Failed to create device", err, logger.String("agent_id", req.AgentID))
-			return nil, errors.ErrServerError("failed to create device").WithCause(err)
-		}
-		s.logger.Info(ctx, "New device registered successfully", logger.String("agent_id", req.AgentID))
-		s.auditService.LogEvent(ctx, models.AuditEvent{
-			EventType: "device.register",
-			TenantID:  req.TenantID,
-			Actor:     req.AgentID,
-			Success:   true,
-		})
-	}
-
-	refreshToken, accessToken, err := s.tokenService.IssueTokenPair(ctx, req.TenantID, req.AgentID, req.DeviceFingerprint, nil, nil)
-	if err != nil {
-		s.logger.Error(ctx, "Failed to issue token pair", err, logger.String("agent_id", req.AgentID))
-		return nil, err
-	}
-
-	if refreshToken == nil || accessToken == nil {
-		return nil, errors.ErrServerError("token service returned nil tokens without error")
-	}
-
-	s.logger.Info(ctx, "Device registration and token issuance successful",
-		logger.String("tenant_id", req.TenantID),
-		logger.String("agent_id", req.AgentID),
-	)
-
-	return &dto.TokenResponse{
-		AccessToken:  accessToken.JTI,
-		RefreshToken: refreshToken.JTI,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(accessToken.TimeUntilExpiry().Seconds()),
-		Scope:        accessToken.Scope,
-		IssuedAt:     accessToken.IssuedAt.Unix(),
-	}, nil
 }
 
 // IssueToken handles the business logic for issuing a new token pair to an already authenticated device.
@@ -313,6 +213,7 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 		s.logger.Error(ctx, "Failed to revoke old refresh token", err, logger.String("jti", refreshToken.JTI))
 		return nil, errors.ErrServerError("failed to revoke old refresh token").WithCause(err)
 	}
+	s.logger.Info(ctx, "Refresh token rotated", logger.F("agent_id", refreshToken.DeviceID), logger.F("revoked_jti", refreshToken.JTI))
 
 	// 3. Assess Risk
 	riskProfile, err := s.riskOracle.GetTenantRisk(ctx, refreshToken.TenantID, refreshToken.DeviceID)
@@ -331,15 +232,20 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 
 	switch trustLevel {
 	case models.TrustLevelHigh:
+		s.metrics.RecordTokenIssueByTrust("high_trust", refreshToken.TenantID)
 		newTTL = defaultTTL
 		newScope = defaultScope
 	case models.TrustLevelMedium:
+		s.metrics.RecordTokenIssueByTrust("medium_trust", refreshToken.TenantID)
 		newTTL = 5 * time.Minute
 		newScope = defaultScope
 	case models.TrustLevelLow:
+		s.metrics.RecordTokenIssueByTrust("low_trust", refreshToken.TenantID)
 		newTTL = 60 * time.Second
 		newScope = "agent:read"
+		s.logger.Info(ctx, "Low trust token issued", logger.F("agent_id", refreshToken.DeviceID), logger.F("new_ttl_seconds", 60))
 	default:
+		s.metrics.RecordTokenIssueByTrust("unknown_trust", refreshToken.TenantID)
 		newTTL = 60 * time.Second
 		newScope = "" // No scope for unknown trust levels
 	}

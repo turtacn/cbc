@@ -62,8 +62,8 @@ func (m *MockTokenService) IsTokenRevoked(ctx context.Context, jti string) (bool
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockTokenService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, requestedScope []string) (*models.Token, error) {
-	args := m.Called(ctx, refreshToken, requestedScope)
+func (m *MockTokenService) GenerateAccessToken(ctx context.Context, refreshToken *models.Token, ttl *time.Duration, scope string, trustLevel string) (*models.Token, error) {
+	args := m.Called(ctx, refreshToken, ttl, scope, trustLevel)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -126,7 +126,10 @@ func TestAuthAppService_RevokeToken(t *testing.T) {
 		nil, // rateLimitService
 		mockBlacklist,
 		mockAuditService,
+		nil, // riskOracle
+		nil, // policyEngine
 		testLogger,
+		nil, // metrics
 	)
 
 	ctx := context.Background()

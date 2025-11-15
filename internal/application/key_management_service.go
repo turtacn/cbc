@@ -70,7 +70,7 @@ func (s *KeyManagementService) RotateTenantKey(ctx context.Context, tenantID str
 		keySize = 3072
 	}
 
-	riskProfile, err := s.riskOracle.GetTenantRisk(ctx, tenantID)
+	riskProfile, err := s.riskOracle.GetTenantRisk(ctx, tenantID, "") // Passing empty agentID as it's not relevant here
 	if err != nil {
 		return "", fmt.Errorf("failed to get tenant risk profile: %w", err)
 	}

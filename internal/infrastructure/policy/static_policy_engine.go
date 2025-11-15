@@ -80,3 +80,15 @@ func (e *StaticPolicyEngine) CheckKeyGeneration(ctx context.Context, policyReque
 
 	return nil
 }
+
+// EvaluateTrustLevel evaluates the trust level based on the risk profile.
+// This is a placeholder implementation.
+func (e *StaticPolicyEngine) EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel {
+	if riskProfile.AnomalyScore > 0.75 {
+		return models.TrustLevelLow
+	}
+	if riskProfile.AnomalyScore > 0.5 {
+		return models.TrustLevelMedium
+	}
+	return models.TrustLevelHigh
+}

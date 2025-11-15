@@ -374,8 +374,15 @@ func (app *Application) initApplicationServices() error {
 	}
 	deviceAuthStore := redisStore.NewRedisDeviceAuthStore(redisClient)
 
-	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, app.logger)
-	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.kms, &app.config.OAuth)
+	riskOracle := application.NewRiskOracle(app.riskRepo)
+	policyEngine, err := policy.NewStaticPolicyEngine(app.config.Policy.PolicyFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create policy engine: %w", err)
+	}
+	metricsAdapter := monitoring.NewMetricsAdapter(app.metrics)
+
+	app.authAppService = service.NewAuthAppService(tokenDomainService, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.blacklistStore, app.auditService, riskOracle, policyEngine, app.logger, metricsAdapter)
+	app.deviceAuthAppService = service.NewDeviceAuthAppService(deviceAuthStore, tokenDomainService, app.kms, &app.config.OAuth, app.deviceRepo, app.tenantRepo, app.rateLimitService, app.auditService, app.logger)
 	app.deviceAppService = service.NewDeviceAppService(app.deviceRepo, app.auditService, app.mgrKeyFetcher, app.policyService, tokenDomainService, app.blacklistStore, app.config, app.logger)
 	app.tenantAppService = service.NewTenantAppService(app.tenantRepo, app.kms, app.cdnManager, app.logger)
 	app.logger.Info(app.ctx, "Application services initialized")

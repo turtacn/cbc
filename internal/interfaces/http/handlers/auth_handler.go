@@ -103,7 +103,7 @@ func (h *AuthHandler) RegisterDevice(c *gin.Context) {
 	}
 
 	// Call the application service to perform device registration.
-	response, err := h.authService.RegisterDevice(c.Request.Context(), &req)
+	response, err := h.deviceAuthAppService.RegisterDevice(c.Request.Context(), &req)
 	if err != nil {
 		h.handleAuthError(c, err, "register_device")
 		return
@@ -171,7 +171,7 @@ func (h *AuthHandler) handleAuthError(c *gin.Context, err error, operation strin
 	if !ok {
 		// This is an unexpected, non-domain error.
 		h.logger.Error(c.Request.Context(), "Unexpected error in auth operation", err, logger.String("operation", operation))
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse(err, ""))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error", "error_description": "An unexpected internal error occurred."})
 		return
 	}
 
@@ -181,5 +181,5 @@ func (h *AuthHandler) handleAuthError(c *gin.Context, err error, operation strin
 		logger.String("error", cbcErr.Error()))
 
 	// Respond with the appropriate HTTP status and error details.
-	c.JSON(cbcErr.HTTPStatus(), dto.ErrorResponse(err, ""))
+	c.JSON(cbcErr.HTTPStatus(), gin.H{"error": cbcErr.Code(), "error_description": cbcErr.Description()})
 }
