@@ -17,8 +17,9 @@ import (
 // KafkaProducer 提供了 AuditService 的 Kafka 支持实现。
 // 它将审计事件作为消息发送到指定的 Kafka 主题。
 type KafkaProducer struct {
-	writer *kafka.Writer
-	logger logger.Logger
+	writer           *kafka.Writer
+	revocationWriter *kafka.Writer
+	logger           logger.Logger
 }
 
 // NewKafkaProducer creates and configures a new KafkaProducer.
@@ -36,9 +37,22 @@ func NewKafkaProducer(cfg config.KafkaConfig, logger logger.Logger) (service.Aud
 		BatchSize:    cfg.BatchSize,
 		BatchTimeout: cfg.BatchTimeout,
 	}
+
+	revocationWriter := &kafka.Writer{
+		Addr:         kafka.TCP(cfg.Brokers...),
+		Topic:        cfg.RevocationTopic,
+		Balancer:     &kafka.LeastBytes{},
+		WriteTimeout: cfg.WriteTimeout,
+		ReadTimeout:  cfg.ReadTimeout,
+		RequiredAcks: kafka.RequiredAcks(cfg.RequiredAcks),
+		BatchSize:    cfg.BatchSize,
+		BatchTimeout: cfg.BatchTimeout,
+	}
+
 	return &KafkaProducer{
-		writer: writer,
-		logger: logger.WithComponent("KafkaProducer"),
+		writer:           writer,
+		revocationWriter: revocationWriter,
+		logger:           logger.WithComponent("KafkaProducer"),
 	}, nil
 }
 
@@ -51,11 +65,18 @@ func (p *KafkaProducer) LogEvent(ctx context.Context, event models.AuditEvent) e
 		return err
 	}
 
-	err = p.writer.WriteMessages(ctx, kafka.Message{
+	var targetWriter *kafka.Writer
+	if event.Type == "token_revoked_globally" {
+		targetWriter = p.revocationWriter
+	} else {
+		targetWriter = p.writer
+	}
+
+	err = targetWriter.WriteMessages(ctx, kafka.Message{
 		Value: bytes,
 	})
 	if err != nil {
-		p.logger.Error(ctx, "failed to write message to Kafka", err)
+		p.logger.Error(ctx, "failed to write message to Kafka", err, "topic", targetWriter.Topic)
 		// In a production implementation, add retry logic or a dead-letter queue here.
 	}
 	return err
@@ -64,5 +85,11 @@ func (p *KafkaProducer) LogEvent(ctx context.Context, event models.AuditEvent) e
 // Close gracefully closes the underlying Kafka writer connection.
 // Close 优雅地关闭底层的 Kafka writer 连接。
 func (p *KafkaProducer) Close() error {
-	return p.writer.Close()
+	if err := p.writer.Close(); err != nil {
+		p.logger.Error(context.Background(), "failed to close audit writer", err)
+	}
+	if err := p.revocationWriter.Close(); err != nil {
+		p.logger.Error(context.Background(), "failed to close revocation writer", err)
+	}
+	return nil // Or aggregate errors if needed
 }

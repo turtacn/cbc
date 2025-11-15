@@ -54,9 +54,10 @@ type OAuthConfig struct {
 
 // KafkaConfig holds Kafka settings for the audit producer.
 type KafkaConfig struct {
-	Brokers       []string      `mapstructure:"brokers" env:"CBC_AUTH_KAFKA_BROKERS" default:"localhost:9092"`
-	AuditTopic    string        `mapstructure:"audit_topic" env:"CBC_AUTH_KAFKA_AUDIT_TOPIC" default:"cbc-audit-logs"`
-	WriteTimeout  time.Duration `mapstructure:"write_timeout" env:"CBC_AUTH_KAFKA_WRITE_TIMEOUT" default:"10s"`
+	Brokers         []string      `mapstructure:"brokers" env:"CBC_AUTH_KAFKA_BROKERS" default:"localhost:9092"`
+	AuditTopic      string        `mapstructure:"audit_topic" env:"CBC_AUTH_KAFKA_AUDIT_TOPIC" default:"cbc-audit-logs"`
+	RevocationTopic string        `mapstructure:"revocation_topic" env:"CBC_AUTH_KAFKA_REVOCATION_TOPIC" default:"cbc_global_revocations"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout" env:"CBC_AUTH_KAFKA_WRITE_TIMEOUT" default:"10s"`
 	ReadTimeout   time.Duration `mapstructure:"read_timeout" env:"CBC_AUTH_KAFKA_READ_TIMEOUT" default:"10s"`
 	RequiredAcks  int           `mapstructure:"required_acks" env:"CBC_AUTH_KAFKA_REQUIRED_ACKS" default:"-1"` // -1 for all ISRs
 	MaxMessageBytes int         `mapstructure:"max_message_bytes" env:"CBC_AUTH_KAFKA_MAX_MESSAGE_BYTES" default:"1048576"`
@@ -293,6 +294,9 @@ func (k *KafkaConfig) Validate() error {
 	}
 	if k.AuditTopic == "" {
 		return fmt.Errorf("kafka audit topic is required")
+	}
+	if k.RevocationTopic == "" {
+		return fmt.Errorf("kafka revocation topic is required")
 	}
 	if k.BatchSize <= 0 {
 		return fmt.Errorf("batch size must be positive")

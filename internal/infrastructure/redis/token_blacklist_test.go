@@ -9,7 +9,10 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/turtacn/cbc/internal/domain/models"
+	"github.com/turtacn/cbc/pkg/logger"
 )
 
 func TestTokenBlacklist(t *testing.T) {
@@ -21,7 +24,10 @@ func TestTokenBlacklist(t *testing.T) {
 		Addr: mr.Addr(),
 	})
 
-	store := NewTokenBlacklistStore(rdb)
+	mockAudit := new(MockAuditService)
+	noopLogger := logger.NewNoopLogger()
+
+	store := NewTokenBlacklistStore(rdb, mockAudit, noopLogger)
 	ctx := context.Background()
 
 	tenantID := "tenant-1"
@@ -33,17 +39,28 @@ func TestTokenBlacklist(t *testing.T) {
 		assert.False(t, revoked)
 	})
 
-	t.Run("RevokeAndCheck", func(t *testing.T) {
+	t.Run("RevokeAndCheck_PublishesToKafka", func(t *testing.T) {
 		exp := time.Now().Add(10 * time.Minute)
+
+		// Expect a call to the audit service
+		mockAudit.On("LogEvent", ctx, mock.MatchedBy(func(event models.AuditEvent) bool {
+			return event.Action == "token_revoked_globally" &&
+				event.TenantID == tenantID &&
+				event.Metadata["jti"] == jti
+		})).Return(nil).Once()
+
 		err := store.Revoke(ctx, tenantID, jti, exp)
 		assert.NoError(t, err)
 
 		revoked, err := store.IsRevoked(ctx, tenantID, jti)
 		assert.NoError(t, err)
 		assert.True(t, revoked)
+
+		// Assert that the mock expectation was met
+		mockAudit.AssertExpectations(t)
 	})
 
-	t.Run("Revoke_Expired", func(t *testing.T) {
+	t.Run("Revoke_Expired_DoesNotPublish", func(t *testing.T) {
 		jtiExpired := "jti-expired"
 		exp := time.Now().Add(-10 * time.Minute)
 		err := store.Revoke(ctx, tenantID, jtiExpired, exp)
@@ -57,6 +74,14 @@ func TestTokenBlacklist(t *testing.T) {
 	t.Run("CheckTTL", func(t *testing.T) {
 		jtiTTL := "jti-ttl"
 		exp := time.Now().Add(5 * time.Second)
+
+		// Expect a call to the audit service
+		mockAudit.On("LogEvent", ctx, mock.MatchedBy(func(event models.AuditEvent) bool {
+			return event.Action == "token_revoked_globally" &&
+				event.TenantID == tenantID &&
+				event.Metadata["jti"] == jtiTTL
+		})).Return(nil).Once()
+
 		err := store.Revoke(ctx, tenantID, jtiTTL, exp)
 		assert.NoError(t, err)
 

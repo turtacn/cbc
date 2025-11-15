@@ -42,6 +42,7 @@ import (
 	// Infrastructure Layer
 	"github.com/turtacn/cbc/internal/infrastructure/audit"
 	"github.com/turtacn/cbc/internal/infrastructure/cdn"
+	"github.com/turtacn/cbc/internal/infrastructure/consumers"
 	"github.com/turtacn/cbc/internal/infrastructure/crypto"
 	"github.com/turtacn/cbc/internal/infrastructure/kms"
 	"github.com/turtacn/cbc/internal/infrastructure/monitoring"
@@ -117,6 +118,7 @@ type Application struct {
 	httpServer           *http.Server
 	internalHTTPServer   *http.Server
 	grpcServer           *grpc.Server
+	revocationConsumer   *consumers.RevocationConsumer
 	ctx                  context.Context
 	cancel               context.CancelFunc
 }
@@ -328,7 +330,8 @@ func (app *Application) initDomainServices() error {
 	}
 
 	app.rateLimitService = &ratelimitadapter.ServiceAdapter{RL: app.rateLimiter}
-	app.blacklistStore = redisStore.NewTokenBlacklistStore(redisClient)
+	app.blacklistStore = redisStore.NewTokenBlacklistStore(redisClient, app.auditService, app.logger)
+	app.revocationConsumer = consumers.NewRevocationConsumer(app.config.Kafka, redisClient, app.logger)
 	// The stub policy service is only for testing, so we pass nil here.
 	// A real implementation would be instantiated here.
 	app.policyService = nil
@@ -495,6 +498,9 @@ func (app *Application) setupTLSConfig() (*tls.Config, error) {
 // Start launches all the application's servers (HTTP, internal HTTP, gRPC, metrics) in separate goroutines.
 // Start 在单独的 goroutine 中启动所有应用程序的服务器（HTTP、内部 HTTP、gRPC、指标）。
 func (app *Application) Start() error {
+	// Start the revocation consumer
+	go app.revocationConsumer.Start(app.ctx)
+
 	// Start the main public-facing HTTP/S server.
 	go func() {
 		if app.config.Server.TLS.Enabled {
@@ -549,6 +555,11 @@ func (app *Application) Shutdown() error {
 	app.logger.Info(app.ctx, "Shutting down application components...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
+
+	// Stop the consumer first.
+	if app.revocationConsumer != nil {
+		app.revocationConsumer.Stop()
+	}
 
 	// Shutdown servers in parallel for speed.
 	var shutdownErr error
