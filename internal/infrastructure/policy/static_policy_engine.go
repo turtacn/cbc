@@ -81,9 +81,28 @@ func (e *StaticPolicyEngine) CheckKeyGeneration(ctx context.Context, policyReque
 	return nil
 }
 
-// EvaluateTrustLevel evaluates the trust level based on the risk profile.
-// This is a placeholder implementation.
-func (e *StaticPolicyEngine) EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel {
+// EvaluateTrustLevel evaluates the trust level based on the risk profile and client IP.
+func (e *StaticPolicyEngine) EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile, clientIP string) models.TrustLevel {
+	// Rule 1: Check against blocked IP list. If matched, immediately return Low trust.
+	if len(riskProfile.BlockedIPs) > 0 {
+		for _, blockedIP := range riskProfile.BlockedIPs {
+			if blockedIP == clientIP {
+				return models.TrustLevelLow
+			}
+		}
+	}
+
+	// Rule 2: Check against trusted IP list. If matched, return High trust.
+	// Note: This check happens *after* the block list.
+	if len(riskProfile.TrustedIPs) > 0 {
+		for _, trustedIP := range riskProfile.TrustedIPs {
+			if trustedIP == clientIP {
+				return models.TrustLevelHigh
+			}
+		}
+	}
+
+	// Fallback to anomaly score if no IP rules match.
 	if riskProfile.AnomalyScore > 0.75 {
 		return models.TrustLevelLow
 	}

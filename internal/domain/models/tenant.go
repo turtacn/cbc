@@ -3,6 +3,7 @@
 package models
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"time"
 
@@ -80,11 +81,19 @@ type KeyRotationPolicy struct {
 
 	// DeprecatedKeyIDs is a list of old key IDs that are still valid for token verification but not for signing.
 	// DeprecatedKeyIDs 是一个旧密钥 ID 列表，这些密钥对于令牌验证仍然有效，但不能用于签名。
-	DeprecatedKeyIDs []string `json:"deprecated_key_ids,omitempty"`
+	DeprecatedKeyIDs []string `json:"deprecated_key_ids,omitempty" gorm:"type:json"`
 
 	// AutoRotationEnabled indicates whether automatic key rotation is enabled for the tenant.
 	// AutoRotationEnabled 指示是否为租户启用了自动密钥轮换。
 	AutoRotationEnabled bool `json:"auto_rotation_enabled"`
+}
+
+func (p KeyRotationPolicy) Value() (driver.Value, error) {
+	return json.Marshal(p)
+}
+
+func (p *KeyRotationPolicy) Scan(value interface{}) error {
+	return json.Unmarshal(value.([]byte), p)
 }
 
 // RateLimitConfig defines the rate limiting configuration for a tenant.
@@ -115,6 +124,14 @@ type RateLimitConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+func (c RateLimitConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+func (c *RateLimitConfig) Scan(value interface{}) error {
+	return json.Unmarshal(value.([]byte), c)
+}
+
 // TokenTTLConfig defines the Time-To-Live (TTL) configuration for tokens for a tenant.
 // TokenTTLConfig 定义租户令牌的生存时间 (TTL) 配置。
 type TokenTTLConfig struct {
@@ -131,6 +148,14 @@ type TokenTTLConfig struct {
 	OneTimeRefreshToken bool `json:"one_time_refresh_token"`
 }
 
+func (c TokenTTLConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+func (c *TokenTTLConfig) Scan(value interface{}) error {
+	return json.Unmarshal(value.([]byte), c)
+}
+
 // SecurityPolicy defines additional, tenant-specific security requirements.
 // SecurityPolicy 定义附加的、特定于租户的安全要求。
 type SecurityPolicy struct {
@@ -144,7 +169,7 @@ type SecurityPolicy struct {
 
 	// AllowedIPRanges is a list of allowed IP ranges in CIDR notation from which requests are accepted.
 	// AllowedIPRanges 是接受请求的允许 IP 范围列表（CIDR 表示法）。
-	AllowedIPRanges []string `json:"allowed_ip_ranges,omitempty"`
+	AllowedIPRanges []string `json:"allowed_ip_ranges,omitempty" gorm:"type:json"`
 
 	// MinTrustLevel is the minimum device trust level required for authentication.
 	// MinTrustLevel 是身份验证所需的最低设备信任级别。
@@ -153,6 +178,14 @@ type SecurityPolicy struct {
 	// MaxDevicesPerTenant is the maximum number of devices that can be registered under this tenant.
 	// MaxDevicesPerTenant 是此租户下可以注册的最大设备数。
 	MaxDevicesPerTenant int `json:"max_devices_per_tenant"`
+}
+
+func (p SecurityPolicy) Value() (driver.Value, error) {
+	return json.Marshal(p)
+}
+
+func (p *SecurityPolicy) Scan(value interface{}) error {
+	return json.Unmarshal(value.([]byte), p)
 }
 
 // NewTenant creates a new Tenant instance with a set of sensible default policies.

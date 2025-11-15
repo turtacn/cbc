@@ -1,0 +1,8 @@
+# config/policies.yaml
+
+L1:
+  minKeySize: 2048
+L2:
+  minKeySize: 3072
+L3:
+  minKeySize: 4096

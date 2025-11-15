@@ -170,8 +170,8 @@ type KeyLifecycleRegistry interface {
 // PolicyEngine defines the interface for checking actions against defined policies.
 // PolicyEngine 定义了用于根据定义的策略检查操作的接口。
 type PolicyEngine interface {
-	// EvaluateTrustLevel evaluates the trust level of a device based on its risk profile.
-	EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile) models.TrustLevel
+	// EvaluateTrustLevel evaluates the trust level of a device based on its risk profile and other context.
+	EvaluateTrustLevel(ctx context.Context, riskProfile *models.TenantRiskProfile, clientIP string) models.TrustLevel
 	// CheckKeyGeneration checks if generating a key with the given specs is allowed by policy.
 	// CheckKeyGeneration 检查策略是否允许使用给定规范生成密钥。
 	CheckKeyGeneration(ctx context.Context, policy models.PolicyRequest) error

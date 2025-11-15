@@ -131,6 +131,9 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
+	// Capture the client's IP address from the request context.
+	req.ClientIP = c.ClientIP()
+
 	resp, err := h.authService.RefreshToken(c.Request.Context(), &req)
 	if err != nil {
 		h.handleAuthError(c, err, "refresh_token")

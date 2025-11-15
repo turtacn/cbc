@@ -2,6 +2,8 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,4 +46,17 @@ type AuditEvent struct {
 	// Success indicates whether the action was successful.
 	// @Description Success indicates whether the action was successful.
 	Success bool `json:"success"`
+	// Metadata provides a flexible way to store additional, action-specific context.
+	// @Description Metadata provides a flexible way to store additional, action-specific context.
+	Metadata Metadata `json:"metadata,omitempty" gorm:"type:json"`
+}
+
+type Metadata map[string]string
+
+func (m Metadata) Value() (driver.Value, error) {
+	return json.Marshal(m)
+}
+
+func (m *Metadata) Scan(value interface{}) error {
+	return json.Unmarshal(value.([]byte), m)
 }

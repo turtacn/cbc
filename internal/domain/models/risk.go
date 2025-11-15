@@ -9,7 +9,7 @@ import "time"
 type TenantRiskProfile struct {
 	// TenantID is the identifier of the tenant to whom this risk profile applies.
 	// TenantID 是此风险配置文件适用的租户的标识符。
-	TenantID string `json:"tenant_id"`
+	TenantID string `json:"tenant_id" gorm:"primaryKey"`
 	// AnomalyScore is a numerical value representing the deviation from normal behavior, where higher is riskier.
 	// AnomalyScore 是一个数值，表示与正常行为的偏差，数值越高风险越大。
 	AnomalyScore float64 `json:"anomaly_score"`
@@ -19,6 +19,10 @@ type TenantRiskProfile struct {
 	// LastUpdated is the timestamp when this risk profile was last calculated and updated.
 	// LastUpdated 是上次计算和更新此风险配置文件的时间戳。
 	LastUpdated time.Time `json:"last_updated"`
+	// TrustedIPs is a list of IP addresses that are considered trusted for this tenant.
+	TrustedIPs []string `json:"trusted_ips,omitempty" gorm:"type:json"`
+	// BlockedIPs is a list of IP addresses that are explicitly blocked for this tenant.
+	BlockedIPs []string `json:"blocked_ips,omitempty" gorm:"type:json"`
 }
 
 // TrustLevel is a categorical representation of device or tenant trust.

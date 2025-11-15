@@ -222,7 +222,7 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 		// Default to a profile that ensures low trust on error
 		riskProfile = &models.TenantRiskProfile{AnomalyScore: 1.0}
 	}
-	trustLevel := s.policyEngine.EvaluateTrustLevel(ctx, riskProfile)
+	trustLevel := s.policyEngine.EvaluateTrustLevel(ctx, riskProfile, req.ClientIP)
 
 	// 4. Determine Token Parameters
 	defaultTTL := 15 * time.Minute
@@ -278,6 +278,10 @@ func (s *authAppServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshT
 		Actor:     refreshToken.DeviceID,
 		Success:   true,
 		Details:   fmt.Sprintf("New JTI: %s", newRefreshToken.JTI),
+		Metadata: models.Metadata{
+			"ip":          req.ClientIP,
+			"trust_level": string(trustLevel),
+		},
 	})
 	s.auditService.LogEvent(ctx, models.AuditEvent{
 		EventType: "token.revoke",

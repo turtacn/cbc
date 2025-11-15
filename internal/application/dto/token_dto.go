@@ -22,6 +22,7 @@ type TokenRefreshRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required,min=1"`
 	TenantID     string `json:"tenant_id" validate:"required,min=1,max=64"`
 	Scope        string `json:"scope" validate:"omitempty"`
+	ClientIP     string `json:"-"`
 }
 
 // TokenRevokeRequest 令牌吊销请求 DTO
